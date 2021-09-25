@@ -1,6 +1,6 @@
 # mqtt
 
-A MQTT v3.1.1 Client, with support for Qos 0 and 1.
+A MQTT v3.1.1 Client, with support for QoS 0 and 1.
 
 ## Example
 
