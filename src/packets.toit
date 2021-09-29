@@ -81,15 +81,18 @@ class ConnectPacket extends Packet:
   client_id/string
   username/string?
   password/string?
+  keep_alive/Duration?
 
-  constructor .client_id --.username=null --.password=null:
+  constructor .client_id --.username=null --.password=null --.keep_alive=null:
     super TYPE
 
   variable_header -> ByteArray:
     connect_flags := 0b0000_0010
     if username: connect_flags |= 0b1000_0000
     if password: connect_flags |= 0b0100_0000
-    return #[0, 4, 'M', 'Q', 'T', 'T', 4, connect_flags, 0, 0]
+    data := #[0, 4, 'M', 'Q', 'T', 'T', 4, connect_flags, 0, 0]
+    binary.BIG_ENDIAN.put_uint16 data 8 keep_alive.in_s
+    return data
 
   payload -> ByteArray:
     buffer := bytes.Buffer
@@ -101,12 +104,16 @@ class ConnectPacket extends Packet:
 class ConnAckPacket extends Packet:
   static TYPE ::= 2
 
+  return_code/int
+
   constructor:
+    return_code = 0
     super TYPE
 
   constructor.deserialize reader/reader.BufferedReader:
+    data := reader.read_bytes 2
+    return_code = data[1]
     super TYPE
-    reader.read_bytes 2
 
   variable_header -> ByteArray:
     return #[0, 0]

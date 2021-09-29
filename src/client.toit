@@ -26,6 +26,8 @@ If the client is closed, $handle will gracefully return. Any other ongoing
   calls will throw an exception.
 */
 class Client:
+  static DEFAULT_KEEPALIVE ::= Duration --s=60
+
   transport_/Transport
   logger_/log.Logger
 
@@ -41,7 +43,8 @@ class Client:
       .transport_
       --logger=log.default
       --username/string?=null
-      --password/string?=null:
+      --password/string?=null
+      --keep_alive/Duration=DEFAULT_KEEPALIVE:
     logger_ = logger
     task_ = task --background::
       try:
@@ -51,9 +54,12 @@ class Client:
         task_ = null
         close
 
-    connect := ConnectPacket client_id --username=username --password=password
+    connect := ConnectPacket client_id --username=username --password=password --keep_alive=keep_alive
     transport_.send connect
-    connected_.get
+    ack/ConnAckPacket := connected_.get
+    if ack.return_code != 0:
+      close
+      throw "connection refused: $ack.return_code"
 
   /**
   Close the MQTT Client.
@@ -149,4 +155,3 @@ class Client:
           --if_absent=: logger_.info "unmatched packet id: $ack.packet_id"
       else:
         throw "unhandled packet type: $packet.type"
-
