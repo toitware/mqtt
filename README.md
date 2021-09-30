@@ -1,8 +1,10 @@
 # mqtt
 
-A MQTT v3.1.1 Client, with support for QoS 0 and 1.
+An MQTT v3.1.1 Toit client, with support for QoS 0 and 1.
 
 ## Example
+
+This simple example shows how to publish and subscribe to an MQTT broker. You can find more examples in the [examples/](examples/) folder.
 
 ```
 import mqtt
