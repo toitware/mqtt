@@ -61,13 +61,15 @@ abstract class Packet:
     return buffer.bytes
 
   static encode_length buffer/bytes.Buffer length/int:
-    if length >> 22 > 0:
-      buffer.put_byte 0x80 | ((length >> 22) & 0x7F)
-    if length >> 15 > 0:
-      buffer.put_byte 0x80 | ((length >> 15) & 0x7F)
-    if length >> 8 > 0:
-      buffer.put_byte 0x80 | ((length >> 8) & 0x7F)
-    buffer.put_byte length
+    if length == 0:
+      buffer.put_byte 0
+      return
+
+    while length > 0:
+      byte := length & 0x7f
+      length >>= 7
+      if length > 0: byte |= 0x80
+      buffer.put_byte byte
 
   static encode_string buffer/bytes.Buffer str/string:
     length := ByteArray 2
