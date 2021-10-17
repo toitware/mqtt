@@ -26,13 +26,14 @@ If the client is closed, $handle will gracefully return. Any other ongoing
   calls will throw an exception.
 */
 class Client:
-  static DEFAULT_KEEPALIVE ::= Duration --s=60
+  static DEFAULT_KEEP_ALIVE ::= Duration --s=60
 
   transport_/Transport
   logger_/log.Logger
 
   task_ := null
   next_packet_id_ := 1
+  keep_alive_/Duration?
 
   connected_/monitor.Latch ::= monitor.Latch
   pending_/Map/*<int, monitor.Latch>*/ ::= {:}
@@ -44,7 +45,8 @@ class Client:
       --logger=log.default
       --username/string?=null
       --password/string?=null
-      --keep_alive/Duration=DEFAULT_KEEPALIVE:
+      --keep_alive/Duration=DEFAULT_KEEP_ALIVE:
+    keep_alive_ = keep_alive
     logger_ = logger
     task_ = task --background::
       try:
@@ -142,8 +144,11 @@ class Client:
 
   run_:
     while true:
-      packet := transport_.receive
-      if packet is ConnAckPacket:
+      packet := transport_.receive --timeout=keep_alive_
+      if packet == null:
+        ping := PingReqPacket
+        transport_.send ping
+      else if packet is ConnAckPacket:
         connected_.set packet
       else if packet is PublishPacket:
         publish := packet as PublishPacket
@@ -153,5 +158,6 @@ class Client:
         pending_.get ack.packet_id
           --if_present=: it.set ack
           --if_absent=: logger_.info "unmatched packet id: $ack.packet_id"
+      else if packet is PingRespPacket:
       else:
         throw "unhandled packet type: $packet.type"

@@ -17,8 +17,13 @@ abstract class Packet:
 
   constructor .type --.flags=0:
 
-  static deserialize reader/reader.BufferedReader:
-    byte1 := reader.read_byte
+  static deserialize reader/reader.BufferedReader --timeout/Duration?=null -> Packet?:
+    byte1 := 0
+    e := catch --unwind=(: it != DEADLINE_EXCEEDED_ERROR):
+      with_timeout timeout:
+        byte1 = reader.read_byte
+    if e: return null
+
     kind := byte1 >> 4
     flags := byte1 & 0xf
     size := 0
@@ -39,6 +44,8 @@ abstract class Packet:
       return PubAckPacket.deserialize reader
     if kind == SubAckPacket.TYPE:
       return SubAckPacket.deserialize reader
+    if kind == PingRespPacket.TYPE:
+      return PingRespPacket.deserialize reader
 
     throw "invalid packet kind: $kind"
 
@@ -221,3 +228,30 @@ class SubAckPacket extends Packet implements PacketIDAck:
     return data
 
   payload -> ByteArray: return #[]
+
+class PingReqPacket extends Packet:
+  static TYPE ::= 12
+
+  constructor:
+    super TYPE
+
+  variable_header -> ByteArray:
+    return #[]
+
+  payload -> ByteArray:
+    return #[]
+
+class PingRespPacket extends Packet:
+  static TYPE ::= 13
+
+  constructor:
+    super TYPE
+
+  constructor.deserialize reader/reader.BufferedReader:
+    super TYPE
+
+  variable_header -> ByteArray:
+    return #[]
+
+  payload -> ByteArray:
+    return #[]

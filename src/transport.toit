@@ -15,5 +15,7 @@ interface Transport:
 
   /**
   Receive the next packet from the peer.
+
+  Returns null if timeout was exceeded.
   */
-  receive -> Packet
+  receive --timeout/Duration?=null -> Packet?
