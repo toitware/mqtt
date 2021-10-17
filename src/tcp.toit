@@ -27,5 +27,5 @@ class TcpTransport implements Transport:
     writer_.write
       packet.serialize
 
-  receive -> Packet:
-    return Packet.deserialize reader_
+  receive --timeout/Duration?=null -> Packet?:
+    return Packet.deserialize reader_ --timeout=timeout
