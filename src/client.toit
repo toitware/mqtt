@@ -26,7 +26,7 @@ If the client is closed, $handle will gracefully return. Any other ongoing
   calls will throw an exception.
 */
 class Client:
-  static DEFAULT_KEEPALIVE ::= Duration --s=60
+  static DEFAULT_KEEP_ALIVE ::= Duration --s=60
 
   transport_/Transport
   logger_/log.Logger
@@ -45,7 +45,7 @@ class Client:
       --logger=log.default
       --username/string?=null
       --password/string?=null
-      --keep_alive/Duration=DEFAULT_KEEPALIVE:
+      --keep_alive/Duration=DEFAULT_KEEP_ALIVE:
     keep_alive_ = keep_alive
     logger_ = logger
     task_ = task --background::
