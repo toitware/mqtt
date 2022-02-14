@@ -11,6 +11,14 @@ import .topic_filter
 interface PacketIDAck:
   packet_id -> int
 
+class WillConfig:
+  retain/bool
+  qos/int
+  topic/string
+  message/string
+
+  constructor .topic .message --.qos --.retain=false:
+
 abstract class Packet:
   type/int
   flags/int
@@ -91,14 +99,22 @@ class ConnectPacket extends Packet:
   username/string?
   password/string?
   keep_alive/Duration?
+  will/WillConfig?
 
-  constructor .client_id --.username=null --.password=null --.keep_alive=null:
+  constructor .client_id --.username=null --.password=null --.keep_alive=null --.will=null:
     super TYPE
 
   variable_header -> ByteArray:
     connect_flags := 0b0000_0010
     if username: connect_flags |= 0b1000_0000
     if password: connect_flags |= 0b0100_0000
+    if will: 
+      connect_flags            |= 0b0000_0100
+      connect_flags            |= will.qos << 3
+      if will.retain: 
+        connect_flags          |= 0b0010_0000
+
+
     data := #[0, 4, 'M', 'Q', 'T', 'T', 4, connect_flags, 0, 0]
     binary.BIG_ENDIAN.put_uint16 data 8 keep_alive.in_s
     return data
@@ -106,6 +122,10 @@ class ConnectPacket extends Packet:
   payload -> ByteArray:
     buffer := bytes.Buffer
     Packet.encode_string buffer client_id
+    if will:
+      Packet.encode_string buffer will.topic
+      Packet.encode_string buffer will.message
+      
     if username: Packet.encode_string buffer username
     if password: Packet.encode_string buffer password
     return buffer.bytes

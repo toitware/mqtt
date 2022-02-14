@@ -46,7 +46,8 @@ class Client:
       --logger=log.default
       --username/string?=null
       --password/string?=null
-      --keep_alive/Duration=DEFAULT_KEEP_ALIVE:
+      --keep_alive/Duration=DEFAULT_KEEP_ALIVE
+      --will/WillConfig?=null:
     keep_alive_ = keep_alive
     logger_ = logger
     // Initialize with the current time.
@@ -61,7 +62,7 @@ class Client:
         task_ = null
         close
 
-    connect := ConnectPacket client_id --username=username --password=password --keep_alive=keep_alive
+    connect := ConnectPacket client_id --username=username --password=password --keep_alive=keep_alive --will=will
     transport_.send connect
     ack/ConnAckPacket := connected_.get
     if ack.return_code != 0:
