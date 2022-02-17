@@ -38,6 +38,7 @@ main:
     if it % 2 == 0: channel = "topic/foo"
     else: channel = "topic/bar"
     client.publish channel payload
+    sleep --ms=1000
 
   // Send a signal to stop listening for messages.
   client.publish "topic/foo" #[0]
