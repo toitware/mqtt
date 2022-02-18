@@ -34,6 +34,7 @@ class Client:
   task_ := null
   next_packet_id_ := 1
   keep_alive_/Duration?
+  last_sent_us_/int := ?
 
   connected_/monitor.Latch ::= monitor.Latch
   pending_/Map/*<int, monitor.Latch>*/ ::= {:}
@@ -48,6 +49,10 @@ class Client:
       --keep_alive/Duration=DEFAULT_KEEP_ALIVE:
     keep_alive_ = keep_alive
     logger_ = logger
+    // Initialize with the current time.
+    // We are doing a connection request just below.
+    last_sent_us_ = Time.monotonic_us
+
     task_ = task --background::
       try:
         catch --trace:
@@ -74,6 +79,10 @@ class Client:
       task_.cancel
       task_ = null
 
+  send_ packet/Packet:
+    transport_.send packet
+    last_sent_us_ = Time.monotonic_us
+
   /**
   Publish a MQTT message on $topic.
   */
@@ -89,11 +98,11 @@ class Client:
 
     // If we don't have a packet identifier (QoS == 0), don't wait for an ack.
     if not packet_id:
-      transport_.send packet
+      send_ packet
       return
 
     wait_for_ack_ packet_id: | latch/monitor.Latch |
-      transport_.send packet
+      send_ packet
       ack := latch.get
       if not ack: throw "client closed"
 
@@ -117,7 +126,7 @@ class Client:
       --packet_id=packet_id
 
     wait_for_ack_ packet_id: | latch/monitor.Latch |
-      transport_.send packet
+      send_ packet
       ack := latch.get
       if not ack: throw "client closed"
 
@@ -132,7 +141,7 @@ class Client:
       block.call publish.topic publish.payload
       if publish.packet_id:
         ack := PubAckPacket publish.packet_id
-        transport_.send ack
+        send_ ack
 
   wait_for_ack_ packet_id [block]:
     latch := monitor.Latch
@@ -144,10 +153,18 @@ class Client:
 
   run_:
     while true:
-      packet := transport_.receive --timeout=keep_alive_
+      remaining_keep_alive_us := keep_alive_.in_us - (Time.monotonic_us - last_sent_us_)
+      packet := ?
+      if remaining_keep_alive_us <= 0:
+        packet = null
+      else:
+        remaining_keep_alive := Duration --us=remaining_keep_alive_us
+        // Timeout returns a `null` packet.
+        packet = transport_.receive --timeout=remaining_keep_alive
+
       if packet == null:
         ping := PingReqPacket
-        transport_.send ping
+        send_ ping
       else if packet is ConnAckPacket:
         connected_.set packet
       else if packet is PublishPacket:
