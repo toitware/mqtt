@@ -155,7 +155,7 @@ class Client:
     while true:
       remaining_keep_alive_us := keep_alive_.in_us - (Time.monotonic_us - last_sent_us_)
       packet := ?
-      if remaining_keep_alive_us < 0:
+      if remaining_keep_alive_us <= 0:
         packet = null
       else:
         remaining_keep_alive := Duration --us=remaining_keep_alive_us
