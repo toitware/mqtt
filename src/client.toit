@@ -9,25 +9,6 @@ import .transport
 import .packets
 import .topic_filter
 
-class SendTrackingTransport_ implements Transport:
-  transport_/Transport
-
-  /**
-  The time when something was last sent on this transport.
-  Uses $Time.monotonic_us.
-  */
-  last_sent_us/int := ?
-
-  constructor .transport_ .last_sent_us:
-
-  send packet/Packet:
-    transport_.send packet
-    last_sent_us = Time.monotonic_us
-
-  receive --timeout/Duration?=null -> Packet?:
-    return transport_.receive --timeout=timeout
-
-
 /**
 MQTT v3.1.1 Client with support for QoS 0 and 1.
 
@@ -47,12 +28,13 @@ If the client is closed, $handle will gracefully return. Any other ongoing
 class Client:
   static DEFAULT_KEEP_ALIVE ::= Duration --s=60
 
-  transport_/SendTrackingTransport_
+  transport_/Transport
   logger_/log.Logger
 
   task_ := null
   next_packet_id_ := 1
   keep_alive_/Duration?
+  last_sent_us_/int := ?
 
   connected_/monitor.Latch ::= monitor.Latch
   pending_/Map/*<int, monitor.Latch>*/ ::= {:}
@@ -60,17 +42,16 @@ class Client:
 
   constructor
       client_id/string
-      transport/Transport
+      .transport_
       --logger=log.default
       --username/string?=null
       --password/string?=null
       --keep_alive/Duration=DEFAULT_KEEP_ALIVE:
-
     keep_alive_ = keep_alive
     logger_ = logger
     // Initialize with the current time.
     // We are doing a connection request just below.
-    transport_ = SendTrackingTransport_ transport Time.monotonic_us
+    last_sent_us_ = Time.monotonic_us
 
     task_ = task --background::
       try:
@@ -98,6 +79,10 @@ class Client:
       task_.cancel
       task_ = null
 
+  send_ packet/Packet:
+    transport_.send packet
+    last_sent_us_ = Time.monotonic_us
+
   /**
   Publish a MQTT message on $topic.
   */
@@ -113,11 +98,11 @@ class Client:
 
     // If we don't have a packet identifier (QoS == 0), don't wait for an ack.
     if not packet_id:
-      transport_.send packet
+      send_ packet
       return
 
     wait_for_ack_ packet_id: | latch/monitor.Latch |
-      transport_.send packet
+      send_ packet
       ack := latch.get
       if not ack: throw "client closed"
 
@@ -141,7 +126,7 @@ class Client:
       --packet_id=packet_id
 
     wait_for_ack_ packet_id: | latch/monitor.Latch |
-      transport_.send packet
+      send_ packet
       ack := latch.get
       if not ack: throw "client closed"
 
@@ -156,7 +141,7 @@ class Client:
       block.call publish.topic publish.payload
       if publish.packet_id:
         ack := PubAckPacket publish.packet_id
-        transport_.send ack
+        send_ ack
 
   wait_for_ack_ packet_id [block]:
     latch := monitor.Latch
@@ -168,14 +153,18 @@ class Client:
 
   run_:
     while true:
-      remaining_keep_alive_us := max
-          keep_alive_.in_us - (Time.monotonic_us - transport_.last_sent_us)
-          0
-      remaining_keep_alive := Duration --us=remaining_keep_alive_us
-      packet := transport_.receive --timeout=remaining_keep_alive
+      remaining_keep_alive_us := keep_alive_.in_us - (Time.monotonic_us - last_sent_us_)
+      packet := ?
+      if remaining_keep_alive_us < 0:
+        packet = null
+      else:
+        remaining_keep_alive := Duration --us=remaining_keep_alive_us
+        // Timeout returns a `null` packet.
+        packet = transport_.receive --timeout=remaining_keep_alive
+
       if packet == null:
         ping := PingReqPacket
-        transport_.send ping
+        send_ ping
       else if packet is ConnAckPacket:
         connected_.set packet
       else if packet is PublishPacket:
