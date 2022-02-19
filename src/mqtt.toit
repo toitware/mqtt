@@ -5,5 +5,6 @@
 import .client
 import .tcp
 import .topic_filter
+import .packets show WillConfig
 
 export *
