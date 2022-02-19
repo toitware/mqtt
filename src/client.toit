@@ -40,6 +40,28 @@ class Client:
   pending_/Map/*<int, monitor.Latch>*/ ::= {:}
   incoming_ ::= monitor.Channel 8
 
+  /**
+  Constructs an MQTT client.
+
+  $client_id (client identifier) 
+    - will be used by the broker to identify a client 
+    - should be unique per broker
+    - can be between 1 and 23 characters long
+    - only characters and numbers are allowed
+
+  $transport_
+    - usually a TCP socket instance to the broker's host and port
+
+  $username/$password
+    - credentials used by client to authenticate to the host
+
+  $keep_alive
+    - defines the maximum duration between two control packets sent by a client
+    - if no control packet was sent, the client will send a PINGREQ message
+
+  $will
+    - defines the message that will be published after a the client disconnected
+  */
   constructor
       client_id/string
       .transport_

@@ -17,6 +17,22 @@ class WillConfig:
   topic/string
   message/string
 
+
+  /**
+  Constructs the configuration of a last will message.
+
+  $topic
+    - the topic where the last will message will be published to
+
+  $message
+    - content of the last will message
+
+  $qos
+    - quality of service level to be used
+
+  $retain
+    - if the message should be retained or not
+  */
   constructor .topic .message --.qos --.retain=false:
 
 abstract class Packet:
