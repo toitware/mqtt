@@ -8,7 +8,7 @@ import net
 main:
   socket := net.open.tcp_connect "test.mosquitto.org" 1883
 
-  will := mqtt.WillConfig
+  will := mqtt.WillConfig.from_string
     "/will-topic"
     "Bye!"
     --retain=true

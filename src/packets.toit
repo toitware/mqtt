@@ -15,7 +15,7 @@ class WillConfig:
   retain/bool
   qos/int
   topic/string
-  message/string
+  payload/ByteArray
 
 
   /**
@@ -24,7 +24,7 @@ class WillConfig:
   $topic
     - the topic where the last will message will be published to
 
-  $message
+  $payload
     - content of the last will message
 
   $qos
@@ -33,7 +33,10 @@ class WillConfig:
   $retain
     - if the message should be retained or not
   */
-  constructor .topic .message --.qos --.retain=false:
+  constructor.from_byte_array .topic .payload --.qos --.retain=false:
+
+  constructor.from_string .topic message/string --.qos --.retain=false:
+    this.payload = message.to_byte_array
 
 abstract class Packet:
   type/int
@@ -124,10 +127,10 @@ class ConnectPacket extends Packet:
     connect_flags := 0b0000_0010
     if username: connect_flags |= 0b1000_0000
     if password: connect_flags |= 0b0100_0000
-    if will: 
+    if will:
       connect_flags            |= 0b0000_0100
       connect_flags            |= will.qos << 3
-      if will.retain: 
+      if will.retain:
         connect_flags          |= 0b0010_0000
 
 
@@ -140,8 +143,8 @@ class ConnectPacket extends Packet:
     Packet.encode_string buffer client_id
     if will:
       Packet.encode_string buffer will.topic
-      Packet.encode_string buffer will.message
-      
+      buffer.write will.payload
+
     if username: Packet.encode_string buffer username
     if password: Packet.encode_string buffer password
     return buffer.bytes
