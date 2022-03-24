@@ -255,3 +255,15 @@ class PingRespPacket extends Packet:
 
   payload -> ByteArray:
     return #[]
+
+class DisconnectPacket extends Packet:
+  static TYPE ::= 14
+
+  constructor:
+    super TYPE
+
+  variable_header -> ByteArray:
+    return #[]
+
+  payload -> ByteArray:
+    return #[]

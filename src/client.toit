@@ -74,6 +74,7 @@ class Client:
   close:
     // TODO(anders): This can block, fix me.
     incoming_.send null
+    send_ DisconnectPacket
     pending_.do --values: it.set null
     if task_:
       task_.cancel
