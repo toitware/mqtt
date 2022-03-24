@@ -37,4 +37,5 @@ main:
 
   print "connected to broker"
 
-  client.close
+  // Close the socket but don't call `client.close` which would gracefully disconnect.
+  socket.close
