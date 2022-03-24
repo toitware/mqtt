@@ -5,13 +5,14 @@
 import bytes
 import binary
 import reader
+import .client show Client  // For toitdoc reference.
 
 import .topic_filter
 
 interface PacketIDAck:
   packet_id -> int
 
-class WillConfig:
+class LastWillConfig:
   retain/bool
   qos/int
   topic/string
@@ -19,24 +20,22 @@ class WillConfig:
 
 
   /**
-  Constructs the configuration of a last will message.
+  Constructs the configuration of a last-will message.
 
-  $topic
-    - the topic where the last will message will be published to
-
-  $payload
-    - content of the last will message
-
-  $qos
-    - quality of service level to be used
-
-  $retain
-    - if the message should be retained or not
+  The parameters $topic, $payload, $qos and $retain have the same
+    meaning as for $Client.publish, and are used when the last-will message
+    is eventually sent.
   */
-  constructor.from_byte_array .topic .payload --.qos --.retain=false:
+  constructor .topic .payload --.qos --.retain=false:
+    if not 0 <= qos <= 2: throw "INVALID_QOS"
 
+  /**
+  Variant of $LastWillConfig.constructor.
+  Takes a string ($message) as payload, instead of a ByteArray.
+  */
   constructor.from_string .topic message/string --.qos --.retain=false:
-    this.payload = message.to_byte_array
+    if not 0 <= qos <= 2: throw "INVALID_QOS"
+    payload = message.to_byte_array
 
 abstract class Packet:
   type/int
@@ -118,19 +117,19 @@ class ConnectPacket extends Packet:
   username/string?
   password/string?
   keep_alive/Duration?
-  will/WillConfig?
+  last_will/LastWillConfig?
 
-  constructor .client_id --.username=null --.password=null --.keep_alive=null --.will=null:
+  constructor .client_id --.username=null --.password=null --.keep_alive=null --.last_will=null:
     super TYPE
 
   variable_header -> ByteArray:
     connect_flags := 0b0000_0010
     if username: connect_flags |= 0b1000_0000
     if password: connect_flags |= 0b0100_0000
-    if will:
+    if last_will:
       connect_flags            |= 0b0000_0100
-      connect_flags            |= will.qos << 3
-      if will.retain:
+      connect_flags            |= last_will.qos << 3
+      if last_will.retain:
         connect_flags          |= 0b0010_0000
 
 
@@ -141,9 +140,10 @@ class ConnectPacket extends Packet:
   payload -> ByteArray:
     buffer := bytes.Buffer
     Packet.encode_string buffer client_id
-    if will:
-      Packet.encode_string buffer will.topic
-      buffer.write will.payload
+    if last_will:
+      Packet.encode_string buffer last_will.topic
+      buffer.write #[last_will.payload.size >> 8, last_will.payload.size & 0xFF]
+      buffer.write last_will.payload
 
     if username: Packet.encode_string buffer username
     if password: Packet.encode_string buffer password

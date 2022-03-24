@@ -8,6 +8,7 @@ import log
 import .transport
 import .packets
 import .topic_filter
+import .tcp  // For toitdoc.
 
 /**
 MQTT v3.1.1 Client with support for QoS 0 and 1.
@@ -43,24 +44,22 @@ class Client:
   /**
   Constructs an MQTT client.
 
-  $client_id (client identifier) 
-    - will be used by the broker to identify a client 
-    - should be unique per broker
-    - can be between 1 and 23 characters long
-    - only characters and numbers are allowed
+  The $client_id (client identifier) will be used by the broker to identify a client.
+    It should be unique per broker and can be between 1 and 23 characters long.
+    Only characters and numbers are allowed
 
-  $transport_
-    - usually a TCP socket instance to the broker's host and port
+  The $transport_ parameter is used to send messages and is usually a TCP socket instance.
+    See $TcpTransport.
 
-  $username/$password
-    - credentials used by client to authenticate to the host
+  If necessary, the $username/$password credentials can be used to authenticate.
 
-  $keep_alive
-    - defines the maximum duration between two control packets sent by a client
-    - if no control packet was sent, the client will send a PINGREQ message
+  The $keep_alive informs the server of the maximum duration between two packets.
+    The client automatically sends PINGREQ messages when necessary. If the value is
+    lower, then the server detects disconnects faster, but the client needs to send
+    more messages.
 
-  $will
-    - defines the message that will be published after a the client disconnected
+  When provided, the $last_will configuration is used to send when the client
+    disconnects ungracefully.
   */
   constructor
       client_id/string
@@ -69,7 +68,7 @@ class Client:
       --username/string?=null
       --password/string?=null
       --keep_alive/Duration=DEFAULT_KEEP_ALIVE
-      --will/WillConfig?=null:
+      --last_will/LastWillConfig?=null:
     keep_alive_ = keep_alive
     logger_ = logger
     // Initialize with the current time.
@@ -84,7 +83,11 @@ class Client:
         task_ = null
         close
 
-    connect := ConnectPacket client_id --username=username --password=password --keep_alive=keep_alive --will=will
+    connect := ConnectPacket client_id
+        --username=username
+        --password=password
+        --keep_alive=keep_alive
+        --last_will=last_will
     transport_.send connect
     ack/ConnAckPacket := connected_.get
     if ack.return_code != 0:

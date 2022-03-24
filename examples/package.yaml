@@ -1,0 +1,6 @@
+dependencies:
+  certificate_roots:
+    url: github.com/toitware/toit-cert-roots
+    version: ^1.2.0
+  mqtt:
+    path: ..
