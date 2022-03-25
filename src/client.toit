@@ -8,6 +8,7 @@ import log
 import .transport
 import .packets
 import .topic_filter
+import .tcp  // For toitdoc.
 
 /**
 MQTT v3.1.1 Client with support for QoS 0 and 1.
@@ -40,13 +41,34 @@ class Client:
   pending_/Map/*<int, monitor.Latch>*/ ::= {:}
   incoming_ ::= monitor.Channel 8
 
+  /**
+  Constructs an MQTT client.
+
+  The $client_id (client identifier) will be used by the broker to identify a client.
+    It should be unique per broker and can be between 1 and 23 characters long.
+    Only characters and numbers are allowed
+
+  The $transport_ parameter is used to send messages and is usually a TCP socket instance.
+    See $TcpTransport.
+
+  If necessary, the $username/$password credentials can be used to authenticate.
+
+  The $keep_alive informs the server of the maximum duration between two packets.
+    The client automatically sends PINGREQ messages when necessary. If the value is
+    lower, then the server detects disconnects faster, but the client needs to send
+    more messages.
+
+  When provided, the $last_will configuration is used to send when the client
+    disconnects ungracefully.
+  */
   constructor
       client_id/string
       .transport_
       --logger=log.default
       --username/string?=null
       --password/string?=null
-      --keep_alive/Duration=DEFAULT_KEEP_ALIVE:
+      --keep_alive/Duration=DEFAULT_KEEP_ALIVE
+      --last_will/LastWill?=null:
     keep_alive_ = keep_alive
     logger_ = logger
     // Initialize with the current time.
@@ -61,7 +83,11 @@ class Client:
         task_ = null
         close
 
-    connect := ConnectPacket client_id --username=username --password=password --keep_alive=keep_alive
+    connect := ConnectPacket client_id
+        --username=username
+        --password=password
+        --keep_alive=keep_alive
+        --last_will=last_will
     transport_.send connect
     ack/ConnAckPacket := connected_.get
     if ack.return_code != 0:
