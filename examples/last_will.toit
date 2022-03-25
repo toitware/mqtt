@@ -3,6 +3,8 @@
 // be found in the EXAMPLES_LICENSE file.
 
 import mqtt
+import mqtt.transport
+import mqtt.packets
 import net
 
 LAST_WILL_TOPIC ::= "/toit-last-will"
@@ -19,23 +21,39 @@ start_will_listener:
     client.close
     return
 
+class HoleTcpTransport implements transport.Transport:
+  transport_ / transport.Transport
+  forward_messages := true
+
+  constructor .transport_:
+
+  send packet/packets.Packet:
+    if forward_messages: transport_.send packet
+
+  receive --timeout/Duration?=null -> packets.Packet?:
+    return transport_.receive --timeout=timeout
+
 main:
   socket := net.open.tcp_connect HOST PORT
 
   task:: start_will_listener
 
-  last_will := mqtt.LastWillConfig.from_string
+  last_will := mqtt.LastWill
     LAST_WILL_TOPIC
-    "Bye!"
+    "Bye!".to_byte_array
     --qos=1
+
+  tcp_transport := mqtt.TcpTransport socket
+  hole_transport := HoleTcpTransport tcp_transport
 
   client := mqtt.Client
     "toit-client-id"
-    mqtt.TcpTransport socket
+    hole_transport
     --last_will=last_will
     --keep_alive=Duration --s=10
 
   print "connected to broker"
 
-  // Close the socket but don't call `client.close` which would gracefully disconnect.
-  socket.close
+  // Disconnect the sending part of the client, so that the broker
+  // thinks that the device dropped off.
+  hole_transport.forward_messages = false

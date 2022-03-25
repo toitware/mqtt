@@ -5,6 +5,6 @@
 import .client
 import .tcp
 import .topic_filter
-import .packets show LastWillConfig
+import .packets show LastWill
 
 export *

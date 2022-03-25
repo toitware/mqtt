@@ -12,12 +12,11 @@ import .topic_filter
 interface PacketIDAck:
   packet_id -> int
 
-class LastWillConfig:
+class LastWill:
   retain/bool
   qos/int
   topic/string
   payload/ByteArray
-
 
   /**
   Constructs the configuration of a last-will message.
@@ -28,14 +27,6 @@ class LastWillConfig:
   */
   constructor .topic .payload --.qos --.retain=false:
     if not 0 <= qos <= 2: throw "INVALID_QOS"
-
-  /**
-  Variant of $LastWillConfig.constructor.
-  Takes a string ($message) as payload, instead of a ByteArray.
-  */
-  constructor.from_string .topic message/string --.qos --.retain=false:
-    if not 0 <= qos <= 2: throw "INVALID_QOS"
-    payload = message.to_byte_array
 
 abstract class Packet:
   type/int
@@ -117,7 +108,7 @@ class ConnectPacket extends Packet:
   username/string?
   password/string?
   keep_alive/Duration?
-  last_will/LastWillConfig?
+  last_will/LastWill?
 
   constructor .client_id --.username=null --.password=null --.keep_alive=null --.last_will=null:
     super TYPE

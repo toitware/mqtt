@@ -68,7 +68,7 @@ class Client:
       --username/string?=null
       --password/string?=null
       --keep_alive/Duration=DEFAULT_KEEP_ALIVE
-      --last_will/LastWillConfig?=null:
+      --last_will/LastWill?=null:
     keep_alive_ = keep_alive
     logger_ = logger
     // Initialize with the current time.
