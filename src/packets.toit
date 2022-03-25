@@ -5,11 +5,28 @@
 import bytes
 import binary
 import reader
+import .client show Client  // For toitdoc reference.
 
 import .topic_filter
 
 interface PacketIDAck:
   packet_id -> int
+
+class LastWill:
+  retain/bool
+  qos/int
+  topic/string
+  payload/ByteArray
+
+  /**
+  Constructs the configuration of a last-will message.
+
+  The parameters $topic, $payload, $qos and $retain have the same
+    meaning as for $Client.publish, and are used when the last-will message
+    is eventually sent.
+  */
+  constructor .topic .payload --.qos --.retain=false:
+    if not 0 <= qos <= 2: throw "INVALID_QOS"
 
 abstract class Packet:
   type/int
@@ -91,14 +108,22 @@ class ConnectPacket extends Packet:
   username/string?
   password/string?
   keep_alive/Duration?
+  last_will/LastWill?
 
-  constructor .client_id --.username=null --.password=null --.keep_alive=null:
+  constructor .client_id --.username=null --.password=null --.keep_alive=null --.last_will=null:
     super TYPE
 
   variable_header -> ByteArray:
     connect_flags := 0b0000_0010
     if username: connect_flags |= 0b1000_0000
     if password: connect_flags |= 0b0100_0000
+    if last_will:
+      connect_flags            |= 0b0000_0100
+      connect_flags            |= last_will.qos << 3
+      if last_will.retain:
+        connect_flags          |= 0b0010_0000
+
+
     data := #[0, 4, 'M', 'Q', 'T', 'T', 4, connect_flags, 0, 0]
     binary.BIG_ENDIAN.put_uint16 data 8 keep_alive.in_s
     return data
@@ -106,6 +131,11 @@ class ConnectPacket extends Packet:
   payload -> ByteArray:
     buffer := bytes.Buffer
     Packet.encode_string buffer client_id
+    if last_will:
+      Packet.encode_string buffer last_will.topic
+      buffer.write #[last_will.payload.size >> 8, last_will.payload.size & 0xFF]
+      buffer.write last_will.payload
+
     if username: Packet.encode_string buffer username
     if password: Packet.encode_string buffer password
     return buffer.bytes
