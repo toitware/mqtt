@@ -100,10 +100,13 @@ class Client:
   close:
     // TODO(anders): This can block, fix me.
     incoming_.send null
-    pending_.do --values: it.set null
-    if task_:
-      task_.cancel
-      task_ = null
+    try:
+      send_ DisconnectPacket
+    finally:
+      pending_.do --values: it.set null
+      if task_:
+        task_.cancel
+        task_ = null
 
   send_ packet/Packet:
     transport_.send packet
