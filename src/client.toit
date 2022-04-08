@@ -102,6 +102,8 @@ class Client:
   */
   close:
     if is_closed: return
+    // Mark as closed.
+    next_packet_id_ = null
     // We need to be able to close even when canceled, so we run the
     // close steps in a critical region.
     critical_do:
