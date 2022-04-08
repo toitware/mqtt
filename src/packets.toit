@@ -34,25 +34,15 @@ abstract class Packet:
 
   constructor .type --.flags=0:
 
-  static deserialize reader/reader.BufferedReader --timeout/Duration?=null -> Packet?:
-    byte1 := 0
-    e := catch --unwind=(: it != DEADLINE_EXCEEDED_ERROR):
-      with_timeout timeout:
-        byte1 = reader.read_byte
-    if e: return null
-
+  static deserialize reader/reader.BufferedReader -> Packet:
+    byte1 := reader.read_byte
     kind := byte1 >> 4
     flags := byte1 & 0xf
     size := 0
     for i := 0; i < 4; i++:
       byte := reader.read_byte
-      if byte & 0x80 != 0:
-        size << 7
-        size |= byte & 0x7F
-      else:
-        size << 8
-        size |= byte
-        break
+      size |= (byte & 0x7f) << (i * 7)
+      if byte & 0x80 == 0: break
     if kind == ConnAckPacket.TYPE:
       return ConnAckPacket.deserialize reader
     if kind == PublishPacket.TYPE:
@@ -249,7 +239,7 @@ class SubAckPacket extends Packet implements PacketIDAck:
     data := reader.read_bytes 2
     packet_id = binary.BIG_ENDIAN.uint16 data 0
     qos = reader.read_byte
-    if qos == 127: throw "QoS negotiatio failed"
+    if qos == 127: throw "QoS negotiation failed"
     super TYPE
 
   variable_header -> ByteArray:

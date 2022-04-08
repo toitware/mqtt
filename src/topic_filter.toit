@@ -4,7 +4,7 @@
 
 
 /**
-A topic filter for subscribing to a custom pub-sub.
+A topic filter for subscribing to MQTT topics.
 */
 class TopicFilter:
   filter/string

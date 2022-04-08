@@ -4,11 +4,14 @@
 
 import monitor
 import log
+import reader
 
 import .transport
 import .packets
 import .topic_filter
 import .tcp  // For toitdoc.
+
+CLIENT_CLOSED_EXCEPTION ::= "CLIENT_CLOSED"
 
 /**
 MQTT v3.1.1 Client with support for QoS 0 and 1.
@@ -31,11 +34,11 @@ class Client:
 
   transport_/Transport
   logger_/log.Logger
-
-  task_ := null
-  next_packet_id_ := 1
   keep_alive_/Duration?
+
+  next_packet_id_/int? := 1  // Field is `null` when client is closed.
   last_sent_us_/int := ?
+  task_ := null
 
   connected_/monitor.Latch ::= monitor.Latch
   pending_/Map/*<int, monitor.Latch>*/ ::= {:}
@@ -77,7 +80,7 @@ class Client:
 
     task_ = task --background::
       try:
-        catch --trace:
+        catch --trace=(: should_trace_exception_ it):
           run_
       finally:
         task_ = null
@@ -95,35 +98,41 @@ class Client:
       throw "connection refused: $ack.return_code"
 
   /**
-  Close the MQTT Client.
+  Close the MQTT client.
   */
   close:
-    // TODO(anders): This can block, fix me.
-    incoming_.send null
-    try:
-      send_ DisconnectPacket
-    finally:
+    if is_closed: return
+    // We need to be able to close even when canceled, so we run the
+    // close steps in a critical region.
+    critical_do:
+      // TODO(anders): The incoming buffer can be full in which case this will
+      // block. All we want to achieve is to unblock the corresponding call to
+      // receive, so the task stuck in $handle can continue.
+      incoming_.send null
+      catch --trace=(: should_trace_exception_ it):
+        send_ DisconnectPacket
       pending_.do --values: it.set null
-      if task_:
-        task_.cancel
-        task_ = null
-
-  send_ packet/Packet:
-    transport_.send packet
-    last_sent_us_ = Time.monotonic_us
+      if task_: task_.cancel
 
   /**
-  Publish a MQTT message on $topic.
+  Returns whether or not the client is closed.
+  */
+  is_closed -> bool:
+    return next_packet_id_ == null
+
+  /**
+  Publish an MQTT message on $topic.
   */
   publish topic/string payload/ByteArray --qos=1 --retain=false:
+    if is_closed: throw CLIENT_CLOSED_EXCEPTION
     packet_id := qos > 0 ? next_packet_id_++ : null
 
     packet := PublishPacket
-      topic
-      payload
-      --qos=qos
-      --retain=retain
-      --packet_id=packet_id
+        topic
+        payload
+        --qos=qos
+        --retain=retain
+        --packet_id=packet_id
 
     // If we don't have a packet identifier (QoS == 0), don't wait for an ack.
     if not packet_id:
@@ -133,7 +142,7 @@ class Client:
     wait_for_ack_ packet_id: | latch/monitor.Latch |
       send_ packet
       ack := latch.get
-      if not ack: throw "client closed"
+      if not ack: throw CLIENT_CLOSED_EXCEPTION
 
   /**
   Subscribe to a single topic $filter, with the provided $qos.
@@ -148,16 +157,19 @@ class Client:
     before returning.
   */
   subscribe topic_filters/List:
+    if is_closed: throw CLIENT_CLOSED_EXCEPTION
     packet_id := next_packet_id_++
-
-    packet := SubscribePacket
-      topic_filters
-      --packet_id=packet_id
-
+    packet := SubscribePacket topic_filters --packet_id=packet_id
     wait_for_ack_ packet_id: | latch/monitor.Latch |
       send_ packet
       ack := latch.get
-      if not ack: throw "client closed"
+      if not ack: throw CLIENT_CLOSED_EXCEPTION
+
+  /**
+  Unsubscribe to a single topic $filter.
+  */
+  unsubscribe filter/string -> none:
+    // Not implemented yet.
 
   /**
   Handle incoming messages. The $block is called with two arguments,
@@ -172,6 +184,10 @@ class Client:
         ack := PubAckPacket publish.packet_id
         send_ ack
 
+  send_ packet/Packet:
+    transport_.send packet
+    last_sent_us_ = Time.monotonic_us
+
   wait_for_ack_ packet_id [block]:
     latch := monitor.Latch
     pending_[packet_id] = latch
@@ -181,7 +197,7 @@ class Client:
       pending_.remove packet_id
 
   run_:
-    while true:
+    while not task.is_canceled:
       remaining_keep_alive_us := keep_alive_.in_us - (Time.monotonic_us - last_sent_us_)
       packet := ?
       if remaining_keep_alive_us <= 0:
@@ -202,8 +218,14 @@ class Client:
       else if packet is PacketIDAck:
         ack := packet as PacketIDAck
         pending_.get ack.packet_id
-          --if_present=: it.set ack
-          --if_absent=: logger_.info "unmatched packet id: $ack.packet_id"
+            --if_present=: it.set ack
+            --if_absent=: logger_.info "unmatched packet id: $ack.packet_id"
       else if packet is PingRespPacket:
+        // Do nothing.
       else:
         throw "unhandled packet type: $packet.type"
+
+  static should_trace_exception_ exception/any -> bool:
+    if exception == "NOT_CONNECTED": return false
+    if exception == reader.UNEXPECTED_END_OF_READER_EXCEPTION: return false
+    return true
