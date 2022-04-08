@@ -98,7 +98,7 @@ class Client:
       throw "connection refused: $ack.return_code"
 
   /**
-  Close the MQTT client.
+  Closes the MQTT client.
   */
   close:
     if is_closed: return
@@ -117,13 +117,24 @@ class Client:
       if task_: task_.cancel
 
   /**
-  Returns whether or not the client is closed.
+  Whether the client is closed.
   */
   is_closed -> bool:
     return next_packet_id_ == null
 
   /**
-  Publish an MQTT message on $topic.
+  Publishes an MQTT message on $topic.
+  
+  The $qos parameter must be either:
+  - 0: at most once, aka "fire and forget". In this configuration the message is sent, but the delivery
+        is not guaranteed.
+  - 1: at least once. The MQTT client ensures that the message is received by the MQTT broker.
+  
+  QOS = 2 (exactly once) is not implemented by this client.
+  
+  The $retain parameter lets the MQTT broker know whether it should retain this message. A new (later)
+    subscription to this $topic would receive the retained message, instead of needing to wait for
+    a new message on that topic.
   */
   publish topic/string payload/ByteArray --qos=1 --retain=false:
     if is_closed: throw CLIENT_CLOSED_EXCEPTION
@@ -148,6 +159,8 @@ class Client:
 
   /**
   Subscribe to a single topic $filter, with the provided $qos.
+  
+  See $publish for an explanation of the different QOS values.
   */
   subscribe filter/string --qos/int:
     subscribe [TopicFilter filter --qos=qos]
