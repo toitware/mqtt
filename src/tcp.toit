@@ -10,7 +10,7 @@ import .transport
 import .packets
 
 /**
-A transport for backing a MQTT client with TCP or TLS/TCP.
+A transport for backing an MQTT client with TCP or TLS/TCP.
 */
 class TcpTransport implements Transport:
   socket_/tcp.Socket
@@ -24,8 +24,10 @@ class TcpTransport implements Transport:
     socket_.set_no_delay true
 
   send packet/Packet:
-    writer_.write
-      packet.serialize
+    writer_.write packet.serialize
 
   receive --timeout/Duration?=null -> Packet?:
-    return Packet.deserialize reader_ --timeout=timeout
+    catch --unwind=(: it != DEADLINE_EXCEEDED_ERROR):
+      with_timeout timeout:
+        return Packet.deserialize reader_
+    return null
