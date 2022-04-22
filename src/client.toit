@@ -41,8 +41,9 @@ class Client:
   task_ := null
 
   connected_/monitor.Latch ::= monitor.Latch
+  sending_/monitor.Mutex ::= monitor.Mutex
+  incoming_/monitor.Channel ::= monitor.Channel 8
   pending_/Map/*<int, monitor.Latch>*/ ::= {:}
-  incoming_ ::= monitor.Channel 8
 
   /**
   Constructs an MQTT client.
@@ -124,14 +125,14 @@ class Client:
 
   /**
   Publishes an MQTT message on $topic.
-  
+
   The $qos parameter must be either:
   - 0: at most once, aka "fire and forget". In this configuration the message is sent, but the delivery
         is not guaranteed.
   - 1: at least once. The MQTT client ensures that the message is received by the MQTT broker.
-  
+
   QOS = 2 (exactly once) is not implemented by this client.
-  
+
   The $retain parameter lets the MQTT broker know whether it should retain this message. A new (later)
     subscription to this $topic would receive the retained message, instead of needing to wait for
     a new message on that topic.
@@ -159,7 +160,7 @@ class Client:
 
   /**
   Subscribe to a single topic $filter, with the provided $qos.
-  
+
   See $publish for an explanation of the different QOS values.
   */
   subscribe filter/string --qos/int:
@@ -200,8 +201,12 @@ class Client:
         send_ ack
 
   send_ packet/Packet:
-    transport_.send packet
-    last_sent_us_ = Time.monotonic_us
+    // Any number of different tasks can start sending packets. It
+    // is critical that the packet bits sent over the transport stream
+    // aren't interleaved, so we use a mutex to serialize the sends.
+    sending_.do:
+      transport_.send packet
+      last_sent_us_ = Time.monotonic_us
 
   wait_for_ack_ packet_id [block]:
     latch := monitor.Latch
