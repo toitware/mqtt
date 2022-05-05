@@ -11,7 +11,7 @@ interface Transport:
   /**
   Send a packet to the peer.
   */
-  send packet/Packet
+  send packet/Packet -> none
 
   /**
   Receive the next packet from the peer.
@@ -19,3 +19,12 @@ interface Transport:
   Returns null if timeout was exceeded.
   */
   receive --timeout/Duration?=null -> Packet?
+
+/**
+A transport that can reconnect in case of failures.
+*/
+interface ReconnectTransport extends Transport:
+  /**
+  Reconnects the transport.
+  */
+  reconnect -> none
