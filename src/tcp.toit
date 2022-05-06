@@ -11,19 +11,47 @@ import monitor
 import .transport
 import .packets
 
+
 /**
 A transport for backing an MQTT client with TCP or TLS/TCP.
+
+Supports reconnecting to the same server if constructed with the connection information.
 */
-class TcpTransport implements Transport:
-  socket_/tcp.Socket
-  writer_/writer.Writer
-  reader_/reader.BufferedReader
+abstract class TcpTransport implements Transport:
+  constructor socket/tcp.Socket:
+    return SocketTcpTransport_ socket
+
+  constructor interface/tcp.Interface --host/string --port/int=1883:
+    return ReconnectingTcpTransport_ interface --host=host --port=port
+
+  constructor.tls interface/tcp.Interface --host/string --port/int=8883
+      --root_certificates/List=[]
+      --server_name/string?=null
+      --certificate/tls.Certificate?=null:
+    return ReconnectingTlsTcpTransport_ interface --host=host --port=port
+      --root_certificates=root_certificates
+      --server_name=server_name
+      --certificate=certificate
+
+  constructor.from_subclass_:
+
+  abstract send packet/Packet
+  abstract receive --timeout/Duration?=null -> Packet?
+
+class SocketTcpTransport_ extends TcpTransport:
+  socket_ /tcp.Socket
+  writer_ /writer.Writer
+  reader_ /reader.BufferedReader
+
+  transport_ /TcpTransport? := null
+  reconnecting_mutex /monitor.Mutex? := null
 
   constructor .socket_:
     writer_ = writer.Writer socket_
     reader_ = reader.BufferedReader socket_
     // Send messages immediately.
     socket_.set_no_delay true
+    super.from_subclass_
 
   send packet/Packet:
     writer_.write packet.serialize
@@ -34,83 +62,85 @@ class TcpTransport implements Transport:
         return Packet.deserialize reader_
     return null
 
-/**
-A transport for backing an MQTT client with TCP or TLS/TCP.
+  close:
+    // TODO(florian): should we close a socket we haven't created?
+    socket_.close
 
-Supports reconnecting to the same server.
-*/
-class ReconnectTcpTransport implements ReconnectTransport:
-  interface_   /tcp.Interface
-  use_tls_     /bool
-  certificate_ /tls.Certificate?
-  server_name_ /string?
-  root_certificates_ /List
+class ReconnectingTcpTransport_ extends TcpTransport implements ReconnectingTransport:
+  // Reconnection information.
+  interface_ /tcp.Interface
+  host_      /string
+  port_      /int
 
-  host_ /string
-  port_ /int
+  // The current connection.
+  socket_ /tcp.Socket? := null
+  writer_ /writer.Writer? := null
+  reader_ /reader.BufferedReader? := null
 
-  transport_ /TcpTransport? := null
-  reconnecting_mutex /monitor.Mutex? := null
+  reconnecting_mutex /monitor.Mutex := monitor.Mutex
 
   constructor .interface_ --host/string --port/int=1883:
     host_ = host
     port_ = port
-    use_tls_ = false
-    root_certificates_ = []
-    server_name_ = null
-    certificate_ = null
+    super.from_subclass_
+    reconnect
 
-    transport_ = new_transport_
+  send packet/Packet:
+    writer_.write packet.serialize
 
-  constructor.tls .interface_ --host/string --port/int=8883
+  receive --timeout/Duration?=null -> Packet?:
+    catch --unwind=(: it != DEADLINE_EXCEEDED_ERROR):
+      with_timeout timeout:
+        return Packet.deserialize reader_
+    return null
+
+  reconnect:
+    // TODO(florian): implement retries and exponential back-off.
+    old_socket := socket_
+    reconnecting_mutex = monitor.Mutex
+    reconnecting_mutex.do:
+      if not identical old_socket socket_: return
+      if old_socket: old_socket.close
+
+      socket := new_connection_
+      writer_ = writer.Writer socket
+      reader_ = reader.BufferedReader socket
+      // Send messages immediately.
+      socket.set_no_delay true
+
+      // Set the new socket_ at the very end. This way we will try to
+      // reconnect again if we are interrupted by a timeout.
+      socket_ = socket
+
+  new_connection_ -> tcp.Socket:
+    return interface_.tcp_connect host_ port_
+
+  close:
+    if socket_: socket_.close
+    socket_ = null
+    writer_ = null
+    reader_ = null
+
+
+class ReconnectingTlsTcpTransport_ extends ReconnectingTcpTransport_:
+  certificate_ /tls.Certificate?
+  server_name_ /string?
+  root_certificates_ /List
+
+  constructor interface/tcp.Interface --host/string --port/int
       --root_certificates/List=[]
       --server_name/string?=null
       --certificate/tls.Certificate?=null:
-    host_ = host
-    port_ = port
-    use_tls_ = true
     root_certificates_ = root_certificates
     server_name_ = server_name
     certificate_ = certificate
-
-    transport_ = new_transport_
-
-  send packet/Packet:
-    transport_.send packet
-
-  receive --timeout/Duration?=null -> Packet?:
-    return transport_.receive --timeout=timeout
-
-  reconnect:
-    if reconnecting_mutex:
-      reconnecting_mutex.do: return
-
-    reconnecting_mutex = monitor.Mutex
-    reconnecting_mutex.do:
-      try:
-        if transport_:
-          close_transport_
-
-        // TODO(florian): implement exponential back-off.
-        transport_ = new_transport_
-      finally:
-        reconnecting_mutex = null
+    super interface --host=host --port=port
 
   new_connection_ -> tcp.Socket:
     socket := interface_.tcp_connect host_ port_
-    if use_tls_:
-      socket = tls.Socket.client socket
-        --server_name=server_name_ or host_
-        --certificate=certificate_
-        --root_certificates=root_certificates_
+    socket = tls.Socket.client socket
+      --server_name=server_name_ or host_
+      --certificate=certificate_
+      --root_certificates=root_certificates_
     return socket
 
-  new_transport_ -> TcpTransport:
-    socket := new_connection_
-    return TcpTransport socket
-
-  close_transport_ -> none:
-    assert: transport_
-    transport := transport_
-    transport_ = null
-    transport.socket_.close

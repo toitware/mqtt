@@ -205,12 +205,12 @@ class Client:
     // is critical that the packet bits sent over the transport stream
     // aren't interleaved, so we use a mutex to serialize the sends.
     sending_.do:
-      exception := catch:
+      exception := catch --trace=(: should_trace_exception_ it):
         transport_.send packet
       if exception:
         if is_closed: return
-        if transport_ is ReconnectTransport:
-          (transport_ as ReconnectTransport).reconnect
+        if transport_ is ReconnectingTransport:
+          (transport_ as ReconnectingTransport).reconnect
           // Try again.
           transport_.send packet
       last_sent_us_ = Time.monotonic_us
@@ -227,17 +227,15 @@ class Client:
     while not task.is_canceled:
       remaining_keep_alive_us := keep_alive_.in_us - (Time.monotonic_us - last_sent_us_)
       packet := null
-      if remaining_keep_alive_us <= 0:
-        packet = null
-      else:
+      if remaining_keep_alive_us > 0:
         remaining_keep_alive := Duration --us=remaining_keep_alive_us
         // Timeout returns a `null` packet.
-        exception := catch:
+        exception := catch --trace=(: should_trace_exception_ it):
           packet = transport_.receive --timeout=remaining_keep_alive
         if exception:
           if is_closed: return
-          if transport_ is ReconnectTransport:
-            (transport_ as ReconnectTransport).reconnect
+          if transport_ is ReconnectingTransport:
+            (transport_ as ReconnectingTransport).reconnect
             continue
 
       if packet == null:

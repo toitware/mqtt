@@ -23,7 +23,7 @@ interface Transport:
 /**
 A transport that can reconnect in case of failures.
 */
-interface ReconnectTransport extends Transport:
+interface ReconnectingTransport extends Transport:
   /**
   Reconnects the transport.
   */
