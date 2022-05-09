@@ -32,9 +32,14 @@ If the client is closed, $handle will gracefully return. Any other ongoing
 class Client:
   static DEFAULT_KEEP_ALIVE ::= Duration --s=60
 
-  transport_/Transport
-  logger_/log.Logger
-  keep_alive_/Duration?
+  client_id_  /string
+  transport_  /Transport
+  username_   /string?
+  password_   /string?
+  keep_alive_ /Duration?
+  last_will_  /LastWill?
+
+  logger_     /log.Logger
 
   next_packet_id_/int? := 1  // Field is `null` when client is closed.
   last_sent_us_/int := ?
@@ -66,15 +71,21 @@ class Client:
     disconnects ungracefully.
   */
   constructor
-      client_id/string
-      .transport_
-      --logger=log.default
-      --username/string?=null
-      --password/string?=null
-      --keep_alive/Duration=DEFAULT_KEEP_ALIVE
-      --last_will/LastWill?=null:
-    keep_alive_ = keep_alive
+      client_id /string
+      transport /Transport
+      --logger /log.Logger = log.default
+      --username /string? = null
+      --password /string? = null
+      --keep_alive /Duration = DEFAULT_KEEP_ALIVE
+      --last_will /LastWill? =null:
+    client_id_ = client_id
+    transport_ = transport
     logger_ = logger
+    username_ = username
+    password_ = password
+    keep_alive_ = keep_alive
+    last_will_ = last_will
+
     // Initialize with the current time.
     // We are doing a connection request just below.
     last_sent_us_ = Time.monotonic_us
@@ -87,16 +98,7 @@ class Client:
         task_ = null
         close
 
-    connect := ConnectPacket client_id
-        --username=username
-        --password=password
-        --keep_alive=keep_alive
-        --last_will=last_will
-    send_ connect
-    ack/ConnAckPacket := connected_.get
-    if ack.return_code != 0:
-      close
-      throw "connection refused: $ack.return_code"
+    connect_
 
   /**
   Closes the MQTT client.
@@ -200,6 +202,18 @@ class Client:
         ack := PubAckPacket publish.packet_id
         send_ ack
 
+  connect_:
+    connect_packet := ConnectPacket client_id_
+        --username=username_
+        --password=password_
+        --keep_alive=keep_alive_
+        --last_will=last_will_
+    send_ connect_packet
+    ack/ConnAckPacket := connected_.get
+    if ack.return_code != 0:
+      close
+      throw "connection refused: $ack.return_code"
+
   send_ packet/Packet:
     // Any number of different tasks can start sending packets. It
     // is critical that the packet bits sent over the transport stream
@@ -212,6 +226,7 @@ class Client:
         if transport_ is ReconnectingTransport:
           (transport_ as ReconnectingTransport).reconnect
           // Try again.
+          connect_
           transport_.send packet
       last_sent_us_ = Time.monotonic_us
 
