@@ -18,12 +18,24 @@ interface Transport:
 
   Returns null if timeout was exceeded.
   */
-  receive --timeout/Duration?=null -> Packet?
+  receive --timeout/Duration? -> Packet?
 
-/**
-A transport that can reconnect in case of failures.
-*/
-interface ReconnectingTransport extends Transport:
+  /**
+  Close the transport.
+
+  If another task is sending or receiving, that operation must throw.
+  Any future $send or $receive calls must throw.
+
+  The disconnection operation itself must not throw.
+  // TODO(florian): should we deal with disconnections that can throw?
+  */
+  disconnect -> none
+
+  /**
+  Whether this transport supports reconnecting.
+  */
+  supports_reconnect -> bool
+
   /**
   Reconnects the transport.
   */
