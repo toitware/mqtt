@@ -5,6 +5,7 @@
 import mqtt
 import net
 
+TOPIC ::= "toit/example/publish_subscribe"
 main:
   socket := net.open.tcp_connect "127.0.0.1" 1883
 
@@ -12,9 +13,8 @@ main:
     "toit-subscribe"
     mqtt.TcpTransport socket
 
+  client.start
   print "connected to broker"
 
-  client.subscribe "a/b" --qos=1
-
-  client.handle: | topic payload |
+  client.subscribe TOPIC --qos=1:: | topic payload |
     print "$topic: $payload.to_string_non_throwing"

@@ -63,8 +63,8 @@ class ActivityMonitoringTransport_ implements Transport:
   receive --timeout/Duration? -> Packet:
     return wrapped_transport_.receive --timeout=timeout
 
-  disconnect -> none:
-    wrapped_transport_.disconnect
+  close -> none:
+    wrapped_transport_.close
 
   supports_reconnect -> bool:
     return wrapped_transport_.supports_reconnect
@@ -117,15 +117,15 @@ class Session_:
   /**
   The session is in the process of disconnecting.
   Once connected, if there is an error during receiving or sending, the session will
-    switch to this state and call $Transport.disconnect. This will cause the
+    switch to this state and call $Transport.close. This will cause the
     other side (receive or send) to shut down as well (if there is any).
-  Once the handler has finished cleaning up, the state switches to $STATE_DISCONNECTED_.
+  Once the handler has finished cleaning up, the state switches to $STATE_CLOSED_.
   */
-  static STATE_DISCONNECTING_ ::= 4
+  static STATE_CLOSING_ ::= 4
   /**
   The session is shut down.
   */
-  static STATE_DISCONNECTED_ ::= 5
+  static STATE_CLOSED_ ::= 5
 
   options_   / ClientOptions_
   transport_ / ActivityMonitoringTransport_
@@ -133,11 +133,10 @@ class Session_:
 
   connected_   /Barrier_ ::= Barrier_
 
-  disconnect_reason_ /any := null
+  closing_reason_ /any := null
 
   state_ / int := STATE_CREATED_
 
-  handler_task /Task_? := null
   connect_task_ /Task_? := null
   ping_task_ /Task_? := null
 
@@ -150,14 +149,14 @@ class Session_:
   is_connected -> bool: return state_ == STATE_CONNECTED_
   is_connecting -> bool:
     return state_ == STATE_CONNECTING1_ or state_ == STATE_CONNECTING2_
-  is_disconnected -> bool: return state_ == STATE_DISCONNECTED_
-  is_disconnecting -> bool: return state_ == STATE_DISCONNECTING_
+  is_closed -> bool: return state_ == STATE_CLOSED_
+  is_closing -> bool: return state_ == STATE_CLOSING_
 
   /**
   Waits for the session to be connected and then calls the given $block.
 
   If the session could not connect throws.
-  If the session is disconnected throws.
+  If the session is closed throws.
   */
   when_connected [block]:
     check_connected_
@@ -166,21 +165,20 @@ class Session_:
   check_connected_:
     exception := connected_.get
     if exception: throw exception
-    // Check that we are still connected and haven't been disconnected in the meantime.
+    // Check that we are still connected and haven't been closed in the meantime.
     if not is_connected: throw CLIENT_CLOSED_EXCEPTION
 
   /**
   Connects to the server and handles incoming packets.
 
-  Only returns when the session is disconnected.
-  Returns null if the session is cleanly disconnected.
-  Returns the reason for the disconnect, otherwise.
+  Only returns when the session is closed.
+  Returns null if the session is cleanly closed.
+  Returns the reason for the closing, otherwise.
   */
   handle [block]:
-    handler_task = task
     try:
       exception := catch --trace=(: should_trace_exception_ it):
-        while not is_disconnecting:
+        while not is_closing:
           packet := transport_.receive --timeout=null
 
           if packet is ConnAckPacket:
@@ -190,12 +188,12 @@ class Session_:
           else:
             block.call packet
 
-      disconnect --reason=exception
+      close --reason=exception
     finally:
       tear_down_
-    assert: is_disconnecting
-    state_ = STATE_DISCONNECTED_
-    return disconnect_reason_
+    assert: is_closing
+    state_ = STATE_CLOSED_
+    return closing_reason_
 
   /**
   Tears down the connection/session.
@@ -204,7 +202,6 @@ class Session_:
   It ensures that allocated resources are freed and waiting clients can resume.
   */
   tear_down_:
-    assert: task == handler_task
     // We need to be able to close even when canceled, so we run the
     // close steps in a critical region.
     // TODO(florian): is this the only place? Do we really need this?
@@ -218,20 +215,20 @@ class Session_:
       if not connected_.has_value:
         connected_.set CLIENT_CLOSED_EXCEPTION
 
-  disconnect --reason=null:
-    if is_disconnecting or is_disconnected: return
-    assert: disconnect_reason_ == null
-    disconnect_reason_ = reason
-    // By setting the state to disconnecting we quell any error messages from disconnecting the transport.
+  close --reason=null:
+    if is_closing or is_closed: return
+    assert: closing_reason_ == null
+    closing_reason_ = reason
+    // By setting the state to closing we quell any error messages from disconnecting the transport.
     // See $should_trace_exception_.
-    state_ = STATE_DISCONNECTING_
-    transport_.disconnect
+    state_ = STATE_CLOSING_
+    transport_.close
 
   should_trace_exception_ exception:
     // We expect to see exceptions when we shut down the transport.
-    // Normally these should be in the disconnecting phase, however, the handler might shut down
-    //   quite fast, in which case the session might already be fully disconnected.
-    return not (is_disconnecting or is_disconnected)
+    // Normally these should be in the closing phase, however, the handler might shut down
+    //   quite fast, in which case the session might already be fully closed.
+    return not (is_closing or is_closed)
 
   send packet/Packet:
     if packet is ConnectPacket:
@@ -244,29 +241,29 @@ class Session_:
       exception := catch --trace=(: should_trace_exception_ it):
         transport_.send packet
       if exception:
-        if is_disconnecting or is_disconnected:
+        if is_closing or is_closed:
           throw CLIENT_CLOSED_EXCEPTION
-        disconnect --reason=exception
+        close --reason=exception
         throw exception
 
   connect:
-    connect_task_ = task:: connect_
-    check_connected_
+    connect_task_ = task --background::
+      connect_
+      connect_task_ = null
+    connected_.get
 
   connect_:
-    assert: task == connect_task_
-    state_ = STATE_CONNECTING1_
-    connect := ConnectPacket options_.client_id
-        --username=options_.username
-        --password=options_.password
-        --keep_alive=options_.keep_alive
-        --last_will=options_.last_will
-    // No need to handle the exception. The 'send' propagates the exception to the
-    // handler task.
-    catch:
-      send connect
-      state_ = STATE_CONNECTING2_
-    connect_task_ = null
+      state_ = STATE_CONNECTING1_
+      connect := ConnectPacket options_.client_id
+          --username=options_.username
+          --password=options_.password
+          --keep_alive=options_.keep_alive
+          --last_will=options_.last_will
+      // No need to handle the exception. The 'send' propagates the exception to the
+      // handler task.
+      catch:
+        send connect
+        state_ = STATE_CONNECTING2_
 
   handle_connack_ packet/ConnAckPacket:
     if state_ != STATE_CONNECTING2_:
@@ -274,12 +271,13 @@ class Session_:
       return
 
     if packet.return_code != 0:
-      state_ = STATE_DISCONNECTED_
+      state_ = STATE_CLOSED_
       connected_.set "connection refused: $packet.return_code"
       return
 
     state_ = STATE_CONNECTED_
-    ping_task_ = task:: activity_checker_
+    ping_task_ = task --background:: activity_checker_
+    print "Connected"
     connected_.set null
 
   activity_checker_:
@@ -310,22 +308,20 @@ class Client:
 
   /** The client has been created. Handle has not been called yet. */
   static STATE_CREATED_ ::= 0
-  /** The client is starting up, as the handle function has been called. */
-  static STATE_HANDLING_ ::= 1
   /** The client is connecting. */
-  static STATE_CONNECTING_ ::= 2
+  static STATE_CONNECTING_ ::= 1
   /** The client is connected. */
-  static STATE_CONNECTED_ ::= 3
+  static STATE_CONNECTED_ ::= 2
   /** The client is disconnected. */
-  static STATE_DISCONNECTED_ ::= 4
+  static STATE_DISCONNECTED_ ::= 3
   /**
   The client is disconnected and in the process of shutting down.
   This only happens once the current message has been handled. That is, once
-    the $handle method's block has returned.
+    the $handle_ method's block has returned.
   */
-  static STATE_CLOSING_ ::= 5
+  static STATE_CLOSING_ ::= 4
   /** The client is closed. */
-  static STATE_CLOSED_ ::= 6
+  static STATE_CLOSED_ ::= 5
 
   state_ /int := STATE_CREATED_
 
@@ -334,7 +330,7 @@ class Client:
   logger_ /log.Logger
 
   session_ /Session_? := null
-  subscriptions_ /Set := {}
+  subscriptions_ /Map := {:}
 
   next_packet_id_/int? := 1
 
@@ -342,10 +338,12 @@ class Client:
   pending_/Map/*<int, monitor.Latch>*/ ::= {:}
   closed_ /Barrier_ ::= Barrier_
 
+  handle_task_ /Task_? := null
+
   /**
   Constructs an MQTT client.
 
-  The client starts disconnected. Call $handle to initiate the connection.
+  The client starts disconnected. Call $start to initiate the connection.
 
   The $client_id (client identifier) will be used by the broker to identify a client.
     It should be unique per broker and can be between 1 and 23 characters long.
@@ -380,14 +378,33 @@ class Client:
         --keep_alive=keep_alive
         --last_will=last_will
 
-  handle [block]:
-    if session_: throw "ALREADY_RUNNING"
+  start -> none
+      --background/bool=false
+      --on_error/Lambda=(:: logger_.error it)
+      --on_unsubscribed/Lambda=(:: logger_.info "received packet for unsubscribed topic: $it.topic"):
+    if state_ != STATE_CREATED_: throw "INVALID_STATE"
+    assert: not session_
     session_ = Session_ transport_ options_ --logger=logger_
+    state_ = STATE_CONNECTING_
+    handle_task_ = task --background=background::
+      exception := handle_ --on_unsubscribed=on_unsubscribed
+      if exception: on_error.call exception
+    // Just catch the call to connect. If there is an error, then the `on_error` function
+    // reports it.
+    catch: session_.connect_
+
+  handle_ --on_unsubscribed/Lambda -> any:
     try:
       exception := session_.handle: | packet/Packet |
         if packet is PublishPacket:
           publish := packet as PublishPacket
-          block.call publish.topic publish.payload
+          topic := publish.topic
+          payload := publish.payload
+          subscriptions_.get topic
+              --if_absent=: on_unsubscribed.call packet
+                logger_.info "received packet for unsubscribed topic: $topic"
+              --if_present=:
+                it.call topic payload
           if publish.packet_id:
             ack := PubAckPacket publish.packet_id
             session_.send ack
@@ -396,7 +413,7 @@ class Client:
           pending_.get ack.packet_id
               --if_present=: it.set ack
               --if_absent=: logger_.info "unmatched packet id: $ack.packet_id"
-      if exception: throw exception
+      return exception
     finally:
       tear_down_
       session_ = null
@@ -428,8 +445,10 @@ class Client:
       catch --trace: session_.send DisconnectPacket
 
     // The session disconnect will stop the $Session_.handle. This in turn will invoke
-    // the `tear_down` in $run method.
-    session_.disconnect
+    // the `tear_down` in $start method.
+    session_.close
+
+    closed_.get
 
   /**
   Whether the client is closed.
@@ -484,8 +503,8 @@ class Client:
 
   See $publish for an explanation of the different QOS values.
   */
-  subscribe filter/string --qos/int=1:
-    subscribe_all [TopicFilter filter --qos=qos]
+  subscribe filter/string --qos/int=1 callback/Lambda:
+    subscribe_all [TopicFilter filter --qos=qos] callback
 
   /**
   Subscribe to tha list a $topic_filters of type $TopicFilter.
@@ -493,8 +512,9 @@ class Client:
   Each topic filter has its own QoS, that the server will verify
     before returning.
   */
-  subscribe_all topic_filters/List:
+  subscribe_all topic_filters/List callback/Lambda:
     if is_closed: throw CLIENT_CLOSED_EXCEPTION
+    // TODO(florian): can we match topics to callbacks?
     packet_id := next_packet_id_++
     packet := SubscribePacket topic_filters --packet_id=packet_id
     wait_for_ack_ packet_id: | latch/monitor.Latch |

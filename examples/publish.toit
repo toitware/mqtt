@@ -4,6 +4,7 @@
 
 import mqtt
 import net
+import monitor
 
 main:
   socket := net.open.tcp_connect "127.0.0.1" 1883
@@ -12,11 +13,12 @@ main:
     "toit-publish"
     mqtt.TcpTransport socket
 
+  client.start
   print "connected to broker"
 
   10.repeat:
-    sleep --ms=1000
-    client.publish "a/b" "$it".to_byte_array
+    client.publish "toit/example/publish_subscribe" "$it".to_byte_array
     print "published '$it'"
+    sleep --ms=1000
 
   client.close

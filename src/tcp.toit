@@ -37,7 +37,7 @@ abstract class TcpTransport implements Transport:
 
   abstract send packet/Packet
   abstract receive --timeout/Duration?=null -> Packet?
-  abstract disconnect -> none
+  abstract close -> none
   abstract supports_reconnect -> bool
   abstract reconnect -> none
 
@@ -65,10 +65,7 @@ class SocketTransport_ extends TcpTransport:
         return Packet.deserialize reader_
     return null
 
-  disconnect -> none:
-    close
-
-  close:
+  close -> none:
     socket_.close
 
   supports_reconnect -> bool:
@@ -131,9 +128,6 @@ class ReconnectingTransport_ extends TcpTransport:
     socket_ = null
     writer_ = null
     reader_ = null
-
-  disconnect -> none:
-    close
 
   supports_reconnect -> bool:
     return true

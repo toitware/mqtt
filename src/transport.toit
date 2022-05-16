@@ -9,19 +9,19 @@ The backing transport for the MQTT client.
 */
 interface Transport:
   /**
-  Send a packet to the peer.
+  Sends a packet to the peer.
   */
   send packet/Packet -> none
 
   /**
-  Receive the next packet from the peer.
+  Receives the next packet from the peer.
 
   Returns null if timeout was exceeded.
   */
   receive --timeout/Duration? -> Packet?
 
   /**
-  Close the transport.
+  Closes the transport.
 
   If another task is sending or receiving, that operation must throw.
   Any future $send or $receive calls must throw.
@@ -29,7 +29,7 @@ interface Transport:
   The disconnection operation itself must not throw.
   // TODO(florian): should we deal with disconnections that can throw?
   */
-  disconnect -> none
+  close -> none
 
   /**
   Whether this transport supports reconnecting.
