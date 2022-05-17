@@ -19,16 +19,16 @@ Supports reconnecting to the same server if constructed with the connection info
 */
 abstract class TcpTransport implements Transport:
   constructor socket/tcp.Socket:
-    return SocketTcpTransport_ socket
+    return SocketTransport_ socket
 
   constructor interface/tcp.Interface --host/string --port/int=1883:
-    return ReconnectingTcpTransport_ interface --host=host --port=port
+    return ReconnectingTransport_ interface --host=host --port=port
 
   constructor.tls interface/tcp.Interface --host/string --port/int=8883
       --root_certificates/List=[]
       --server_name/string?=null
       --certificate/tls.Certificate?=null:
-    return ReconnectingTlsTcpTransport_ interface --host=host --port=port
+    return ReconnectingTlsTransport_ interface --host=host --port=port
       --root_certificates=root_certificates
       --server_name=server_name
       --certificate=certificate
@@ -37,8 +37,11 @@ abstract class TcpTransport implements Transport:
 
   abstract send packet/Packet
   abstract receive --timeout/Duration?=null -> Packet?
+  abstract close -> none
+  abstract supports_reconnect -> bool
+  abstract reconnect -> none
 
-class SocketTcpTransport_ extends TcpTransport:
+class SocketTransport_ extends TcpTransport:
   socket_ /tcp.Socket
   writer_ /writer.Writer
   reader_ /reader.BufferedReader
@@ -62,11 +65,16 @@ class SocketTcpTransport_ extends TcpTransport:
         return Packet.deserialize reader_
     return null
 
-  close:
-    // TODO(florian): should we close a socket we haven't created?
+  close -> none:
     socket_.close
 
-class ReconnectingTcpTransport_ extends TcpTransport implements ReconnectingTransport:
+  supports_reconnect -> bool:
+    return false
+
+  reconnect -> none:
+    throw "UNSUPPORTED"
+
+class ReconnectingTransport_ extends TcpTransport:
   // Reconnection information.
   interface_ /tcp.Interface
   host_      /string
@@ -121,8 +129,10 @@ class ReconnectingTcpTransport_ extends TcpTransport implements ReconnectingTran
     writer_ = null
     reader_ = null
 
+  supports_reconnect -> bool:
+    return true
 
-class ReconnectingTlsTcpTransport_ extends ReconnectingTcpTransport_:
+class ReconnectingTlsTransport_ extends ReconnectingTransport_:
   certificate_ /tls.Certificate?
   server_name_ /string?
   root_certificates_ /List
