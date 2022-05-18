@@ -87,73 +87,20 @@ class ClientOptions:
       --.keep_alive /Duration
       --.last_will /LastWill?:
 
-interface Token:
-  exception -> any
-
-  wait_for_sent
-  wait_for_ack
-
-monitor Token_ implements Token:
-  static STATE_CREATED_ ::= 0
-  static STATE_QUEUED_ ::= 1 << 0
-  static STATE_BEING_SENT_ ::= 1 << 1
-  static STATE_SENT_ ::= 1 << 2
-  static STATE_ACKED_ ::= 1 << 3
-  static STATE_EXCEPTION_ ::= 1 << 4
-
-  state_ := STATE_CREATED_
-
-  packet / Packet? := ?
-  exception_ := null
-
-  constructor .packet:
-
-  exception -> any:
-    return exception_
-
-  update_state state/int:
-    state_ |= state
-
-  set_exception exception:
-    state_ |= STATE_EXCEPTION_
-    exception_ = exception
-
-  wait_for_ack:
-    await: state_ & STATE_ACKED_ != 0 or state_ & STATE_EXCEPTION_ != 0
-
-  wait_for_sent:
-    await: state_ & STATE_SENT_ != 0 or state_ & STATE_EXCEPTION_ != 0
-
 /**
-An unbounded writer queue.
-
-The callers are required to wait for the tokens to be written before they can add
-  a new packet. As such the queue should never grow to a size greater than the
-  number of tasks.
+A fair queue, that ensures that the tasks are executed in the order they arrive.
 */
-monitor WriterQueue_:
-  // TODO(florian): we could prioritize Acks and pings.
-  queue_ / Deque := Deque // of $Token.
+monitor TicketQueue_:
+  ticket_number /int := 0
+  current_ticket /int := 0
 
-  add packet/Packet -> Token:
-    token := Token_ packet
-    queue_.add token
-    token.update_state Token_.STATE_QUEUED_
-    return token
-
-  size -> int:
-    return queue_.size
-
-  get -> Token_:
-    await: not empty_
-    return queue_.remove_first
-
-  empty_ -> bool:
-    return queue_.is_empty
-
-  mark_closed:
-    queue_.do: | token/Token_ |
-      token.set_exception CLIENT_CLOSED_EXCEPTION
+  do [block]:
+    my_ticket := ticket_number++
+    await: current_ticket == my_ticket
+    try:
+      return block.call
+    finally:
+      current_ticket++
 
 
 class Session_:
@@ -208,9 +155,8 @@ class Session_:
 
   connect_task_ /Task_? := null
   ping_task_ /Task_? := null
-  writer_task_ /Task_? := null
 
-  writer_queue_ /WriterQueue_ := WriterQueue_
+  ticket_queue_ /TicketQueue_ := TicketQueue_
 
   constructor transport/Transport .options_ --logger/log.Logger?:
     logger_ = logger
@@ -282,10 +228,6 @@ class Session_:
       if ping_task_:
         ping_task_.cancel
         ping_task_ = null
-      if writer_task_:
-        writer_task_.cancel
-        writer_task_ = null
-      writer_queue_.mark_closed
       if not connected_.has_value:
         connected_.set CLIENT_CLOSED_EXCEPTION
 
@@ -305,28 +247,15 @@ class Session_:
     return not (is_closing or is_closed)
 
   connect:
-    connect_task_ = task --background::
-      connect_
-      connect_task_ = null
+    state_ = STATE_CONNECTING1_
+    connect := ConnectPacket options_.client_id
+        --username=options_.username
+        --password=options_.password
+        --keep_alive=options_.keep_alive
+        --last_will=options_.last_will
+    write_ connect
+    state_ = STATE_CONNECTING2_
     connected_.get
-
-  send packet/Packet -> Token:
-    if packet is ConnectPacket: throw "INVALID_PACKET"
-    check_connected_
-    return writer_queue_.add packet
-
-  connect_:
-      state_ = STATE_CONNECTING1_
-      connect := ConnectPacket options_.client_id
-          --username=options_.username
-          --password=options_.password
-          --keep_alive=options_.keep_alive
-          --last_will=options_.last_will
-      // No need to handle the exception. The 'write_' propagates the exception to the
-      // handler task.
-      catch:
-        write_ connect
-        state_ = STATE_CONNECTING2_
 
   handle_connack_ packet/ConnAckPacket:
     if state_ != STATE_CONNECTING2_:
@@ -339,8 +268,7 @@ class Session_:
       return
 
     state_ = STATE_CONNECTED_
-    ping_task_ = task --background:: activity_checker_
-    writer_task_ = task --background:: handle_outgoing_
+    ping_task_ = run_in_background_:: activity_checker_
     connected_.set null
 
   activity_checker_:
@@ -357,30 +285,31 @@ class Session_:
       else:
         // No need to handle the exception. The 'write_' propagates the exception to the
         // handler task.
-        exception := catch: write_ PingReqPacket
+        exception := catch: send PingReqPacket
         if exception: break
         sleep (options_.keep_alive / 2)
     ping_task_ = null
 
-  handle_outgoing_:
-    while is_connected:
-      token /Token_ := writer_queue_.get
-      token.update_state Token_.STATE_BEING_SENT_
-      // No need to handle the exception. The 'write_' propagates the exception to the
-      // handler task.
-      exception := catch:
-        write_ token.packet
-        token.update_state Token_.STATE_SENT_
-      if exception: break
+  send packet/Packet:
+    if packet is ConnectPacket: throw "INVALID_PACKET"
+    check_connected_
+    ticket_queue_.do:
+      write_ packet
 
   write_ packet/Packet:
-    exception := catch --trace=(: should_trace_exception_ it):
-      transport_.send packet
-    if exception:
-      if is_closing or is_closed:
+    try:
+      exception := catch --unwind=(: not is_closing and not is_closed):
+        transport_.send packet
+      if exception:
+        assert: is_closing or is_closed
         throw CLIENT_CLOSED_EXCEPTION
-      close --reason=exception
-      throw exception
+    finally: | is_exception exception |
+      if is_exception:
+        close --reason=exception
+
+  run_in_background_ fun/Lambda:
+    return task --background::
+      catch: fun.call
 
 
 /**
@@ -417,7 +346,7 @@ class ClientAdvanced:
 
   next_packet_id_/int? := 1
 
-  pending_ / Map ::= {:}  // int -> Token
+  pending_ / Map ::= {:}  // int -> Packet
   closed_ /Barrier_ ::= Barrier_
 
   handle_task_ /Task_? := null
@@ -445,7 +374,7 @@ class ClientAdvanced:
       if exception: on_error.call exception
     // Just catch the call to connect. If there is an error, then the `on_error` function
     // reports it.
-    catch: session_.connect_
+    catch: session_.connect
 
   handle_ --on_packet/Lambda -> any:
     try:
@@ -455,10 +384,7 @@ class ClientAdvanced:
         else if packet is PacketIDAck:
           ack := packet as PacketIDAck
           id := ack.packet_id
-          pending_.get id
-              --if_present=: | token / Token_ |
-                token.update_state Token_.STATE_ACKED_
-                pending_.remove id
+          pending_.remove id
               --if_absent=: logger_.info "unmatched packet id: $id"
       return exception
     finally:
@@ -469,8 +395,6 @@ class ClientAdvanced:
   Tears down the client.
   */
   tear_down_:
-    pending_.do --values: | token / Token_ |
-      token.set_exception CLIENT_CLOSED_EXCEPTION
     state_ = STATE_CLOSED_
     closed_.set true
 
@@ -520,7 +444,7 @@ class ClientAdvanced:
 
   Not all MQTT brokers support $retain.
   */
-  publish topic/string payload/ByteArray --qos=1 --retain=false -> Token:
+  publish topic/string payload/ByteArray --qos=1 --retain=false -> none:
     if is_closed: throw CLIENT_CLOSED_EXCEPTION
     if qos != 0 and qos != 1: throw "INVALID_ARGUMENT"
 
@@ -533,17 +457,17 @@ class ClientAdvanced:
         --retain=retain
         --packet_id=packet_id
 
-    return send_ packet --packet_id=(qos > 0 ? packet_id : null)
+    send_ packet --packet_id=(qos > 0 ? packet_id : null)
 
   /**
   Subscribes to the given list $topic_filters of type $TopicFilter.
   */
-  subscribe_all topic_filters/List -> Token:
+  subscribe_all topic_filters/List -> none:
     if topic_filters.is_empty: throw "INVALID_ARGUMENT"
     if is_closed: throw CLIENT_CLOSED_EXCEPTION
     packet_id := next_packet_id_++
     packet := SubscribePacket topic_filters --packet_id=packet_id
-    return send_ packet --packet_id=packet_id
+    send_ packet --packet_id=packet_id
 
   /**
   Unsubscribes from a single topic $filter.
@@ -551,10 +475,9 @@ class ClientAdvanced:
   unsubscribe filter/string -> none:
     // Not implemented yet.
 
-  send_ packet/Packet --packet_id/int? -> Token:
-    token := session_.send packet
-    if packet_id: pending_[packet_id] = token
-    return token
+  send_ packet/Packet --packet_id/int? -> none:
+    session_.send packet
+    if packet_id: pending_[packet_id] = packet
 
   ack packet/Packet:
     if packet is PacketIDAck:
@@ -745,10 +668,7 @@ class Client:
   Not all MQTT brokers support $retain.
   */
   publish topic/string payload/ByteArray --qos=1 --retain=false:
-    token := advanced_.publish topic payload --qos=qos --retain=retain
-
-    token.wait_for_sent
-    if token.exception: throw token.exception
+    advanced_.publish topic payload --qos=qos --retain=retain
 
   /**
   Subscribes to a single topic $filter, with the provided $max_qos.
@@ -772,8 +692,7 @@ class Client:
       // Just a simple change of callback.
       return
 
-    token := advanced_.subscribe_all topic_filters
-    token.wait_for_sent
+    advanced_.subscribe_all topic_filters
 
   /**
   Unsubscribes from a single topic $filter.
