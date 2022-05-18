@@ -13,7 +13,7 @@ main:
     --client_id = "toit-publish"
     --transport = mqtt.TcpTransport socket
 
-  client.start
+  client.start --detached
   print "connected to broker"
 
   10.repeat:

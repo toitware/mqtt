@@ -18,7 +18,7 @@ interface Transport:
 
   Returns null if timeout was exceeded.
   */
-  receive --timeout/Duration? -> Packet?
+  receive -> Packet?
 
   /**
   Closes the transport.

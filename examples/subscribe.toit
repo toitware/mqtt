@@ -13,7 +13,7 @@ main:
     --client_id = "toit-subscribe"
     --transport = mqtt.TcpTransport socket
 
-  client.start
+  client.start --detached
   print "connected to broker"
 
   client.subscribe TOPIC --max_qos=1:: | topic payload |

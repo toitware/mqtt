@@ -1,2 +1,7 @@
 - make sure that acks are in order.
 - prepare persistency
+
+Tests:
+- test that ping packet can't be interleaved with other packets.
+- last will message.
+- client callback takes longer than ping time.

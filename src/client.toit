@@ -52,16 +52,23 @@ monitor Barrier_:
 
 class ActivityMonitoringTransport_ implements Transport:
   wrapped_transport_ / Transport
+  is_sending /bool := false
+  sending_since /int? := null
   last_sent_us /int? := null
 
   constructor .wrapped_transport_:
 
   send packet/Packet:
-    wrapped_transport_.send packet
-    last_sent_us = Time.monotonic_us
+    try:
+      is_sending = true
+      sending_since = Time.monotonic_us
+      wrapped_transport_.send packet
+      last_sent_us = Time.monotonic_us
+    finally:
+      is_sending = false
 
-  receive --timeout/Duration? -> Packet:
-    return wrapped_transport_.receive --timeout=timeout
+  receive -> Packet?:
+    return wrapped_transport_.receive
 
   close -> none:
     wrapped_transport_.close
@@ -113,23 +120,12 @@ class Session_:
   */
   static KEEP_ALIVE_OVERHEAD_ROOM_US_ ::= 500_000
 
-  /** The session has been created. No connection has been attempted yet. */
-  static STATE_CREATED_ ::= 0
   /**
-  The session is in the process of connecting.
-  The connect package has not been sent yet.
+  The session is considered alive.
+  This could be because we haven't tried to establish a connection, but it
+    could also be that we are happily running.
   */
-  static STATE_CONNECTING1_ ::= 1
-  /**
-  The session is in the process of connecting.
-  The connect package has been sent, but no response has been received yet.
-  */
-  static STATE_CONNECTING2_ ::= 2
-  /**
-  The session is connected.
-  Packets can be sent and received.
-  */
-  static STATE_CONNECTED_ ::= 3
+  static STATE_ALIVE_ ::= 0
   /**
   The session is in the process of disconnecting.
   Once connected, if there is an error during receiving or sending, the session will
@@ -137,179 +133,125 @@ class Session_:
     other side (receive or send) to shut down as well (if there is any).
   Once the handler has finished cleaning up, the state switches to $STATE_CLOSED_.
   */
-  static STATE_CLOSING_ ::= 4
+  static STATE_CLOSING_ ::= 1
   /**
   The session is shut down.
   */
-  static STATE_CLOSED_ ::= 5
+  static STATE_CLOSED_ ::= 2
 
-  options_   / ClientOptions
+  state_ / int := STATE_ALIVE_
+
+  keep_alive_ /Duration
+  should_send_ping_ /bool := false
   transport_ / ActivityMonitoringTransport_
-  logger_    / log.Logger?
-
-  connected_   /Barrier_ ::= Barrier_
+  activity_task_ /Task_? := null
 
   closing_reason_ /any := null
 
-  state_ / int := STATE_CREATED_
-
-  connect_task_ /Task_? := null
-  ping_task_ /Task_? := null
-
   ticket_queue_ /TicketQueue_ := TicketQueue_
 
-  constructor transport/Transport .options_ --logger/log.Logger?:
-    logger_ = logger
+  writing_ /monitor.Mutex ::= monitor.Mutex
+
+  constructor transport/Transport --keep_alive/Duration:
+    keep_alive_ = keep_alive
     transport_ = ActivityMonitoringTransport_(transport)
 
-  is_connected -> bool: return state_ == STATE_CONNECTED_
-  is_connecting -> bool:
-    return state_ == STATE_CONNECTING1_ or state_ == STATE_CONNECTING2_
+  is_alive -> bool: return state_ == STATE_ALIVE_
   is_closed -> bool: return state_ == STATE_CLOSED_
   is_closing -> bool: return state_ == STATE_CLOSING_
-
-  /**
-  Waits for the session to be connected and then calls the given $block.
-
-  If the session could not connect throws.
-  If the session is closed throws.
-  */
-  when_connected [block]:
-    check_connected_
-    block.call
-
-  check_connected_:
-    exception := connected_.get
-    if exception: throw exception
-    // Check that we are still connected and haven't been closed in the meantime.
-    if not is_connected: throw CLIENT_CLOSED_EXCEPTION
 
   /**
   Connects to the server and receives incoming packets.
 
   Only returns when the session is closed.
   Returns null if the session is cleanly closed.
-  Returns the reason for the closing, otherwise.
+  Throws otherwise.
   */
   handle [block]:
+    activity_task_ = task --background::
+      catch:
+        while is_alive:
+          sleep_duration := check_activity_
+          sleep sleep_duration
+          activity_task_ = null
+
     try:
-      exception := catch --trace=(: should_trace_exception_ it):
+      catch --unwind=(: not is_closing and not is_closed):
         while not is_closing:
-          packet := transport_.receive --timeout=null
+          packet := transport_.receive
+          if packet: block.call packet
+    finally: | is_exception exception |
+      close --reason=(is_exception ? exception : null)
+      tear_down
+      state_ = STATE_CLOSED_
 
-          if packet is ConnAckPacket:
-            handle_connack_ (packet as ConnAckPacket)
-          else if packet is PingRespPacket:
-            // Ignore.
-          else:
-            block.call packet
-
-      close --reason=exception
-    finally:
-      tear_down_
-    assert: is_closing
-    state_ = STATE_CLOSED_
-    return closing_reason_
-
-  /**
-  Tears down the connection/session.
-
-  This function is called both for graceful and ungraceful shutdowns.
-  It ensures that allocated resources are freed and waiting clients can resume.
-  */
-  tear_down_:
-    // We need to be able to close even when canceled, so we run the
-    // close steps in a critical region.
-    // TODO(florian): is this the only place? Do we really need this?
-    critical_do:
-      if connect_task_:
-        connect_task_.cancel
-        connect_task_ = null
-      if ping_task_:
-        ping_task_.cancel
-        ping_task_ = null
-      if not connected_.has_value:
-        connected_.set CLIENT_CLOSED_EXCEPTION
+  tear_down:
+    if activity_task_:
+      activity_task_.cancel
+      activity_task_ = null
 
   close --reason=null:
     if is_closing or is_closed: return
     assert: closing_reason_ == null
     closing_reason_ = reason
     // By setting the state to closing we quell any error messages from disconnecting the transport.
-    // See $should_trace_exception_.
     state_ = STATE_CLOSING_
     transport_.close
 
-  should_trace_exception_ exception:
-    // We expect to see exceptions when we shut down the transport.
-    // Normally these should be in the closing phase, however, the handler might shut down
-    //   quite fast, in which case the session might already be fully closed.
-    return not (is_closing or is_closed)
+  /**
+  Checks for activity.
 
-  connect:
-    state_ = STATE_CONNECTING1_
-    connect := ConnectPacket options_.client_id
-        --username=options_.username
-        --password=options_.password
-        --keep_alive=options_.keep_alive
-        --last_will=options_.last_will
-    write_ connect
-    state_ = STATE_CONNECTING2_
-    connected_.get
+  Returns a duration for when it wants to be called again.
+  */
+  check_activity_ -> Duration:
+    // There should have been a 'connect' message.
+    assert: transport_.is_sending or transport_.last_sent_us
 
-  handle_connack_ packet/ConnAckPacket:
-    if state_ != STATE_CONNECTING2_:
-      if logger_: logger_.info "Received spurious CONNACK"
-      return
+    if not transport_.last_sent_us:
+      assert: transport_.is_sending
+      return keep_alive_
 
-    if packet.return_code != 0:
-      state_ = STATE_CLOSED_
-      connected_.set "connection refused: $packet.return_code"
-      return
-
-    state_ = STATE_CONNECTED_
-    ping_task_ = run_in_background_:: activity_checker_
-    connected_.set null
-
-  activity_checker_:
     // TODO(florian): we should be more clever here:
     // We should monitor when the transport starts writing, and when it gets a chunk through.
     // Also, we should monitor that we actually get something from the server.
-    while is_connected:
-      remaining_keep_alive_us := options_.keep_alive.in_us - (Time.monotonic_us - transport_.last_sent_us)
-      // Decrease it to give some room for overhead.
-      remaining_keep_alive_us -= KEEP_ALIVE_OVERHEAD_ROOM_US_
-      if remaining_keep_alive_us > 0:
-        remaining_keep_alive := Duration --us=remaining_keep_alive_us
-        sleep remaining_keep_alive
-      else:
-        // No need to handle the exception. The 'write_' propagates the exception to the
-        // handler task.
-        exception := catch: send PingReqPacket
-        if exception: break
-        sleep (options_.keep_alive / 2)
-    ping_task_ = null
+    remaining_keep_alive_us := keep_alive_.in_us - (Time.monotonic_us - transport_.last_sent_us)
+    // Decrease it to give some room for overhead.
+    remaining_keep_alive_us -= KEEP_ALIVE_OVERHEAD_ROOM_US_
+    if remaining_keep_alive_us > 0:
+      remaining_keep_alive := Duration --us=remaining_keep_alive_us
+      return remaining_keep_alive
+    else if not transport_.is_sending:
+      // TODO(florian): we need to keep track of whether we have sent a ping.
+      write_ PingReqPacket
+      return keep_alive_ / 2
+    else:
+      // TODO(florian): we are currently sending.
+      // We should detect timeouts on the sending.
+      should_send_ping_ = true
+      return keep_alive_
 
   send packet/Packet:
-    if packet is ConnectPacket: throw "INVALID_PACKET"
-    check_connected_
     ticket_queue_.do:
       write_ packet
 
   write_ packet/Packet:
-    try:
-      exception := catch --unwind=(: not is_closing and not is_closed):
-        transport_.send packet
-      if exception:
-        assert: is_closing or is_closed
-        throw CLIENT_CLOSED_EXCEPTION
-    finally: | is_exception exception |
-      if is_exception:
-        close --reason=exception
-
-  run_in_background_ fun/Lambda:
-    return task --background::
-      catch: fun.call
+    // The writers should already be serialized by the Client, but we sometimes send
+    // a ping packet from the handler. This packet is so small that it is unlikely that it
+    // would be interleaved, but to be sure we have a lock here.
+    writing_.do:
+      try:
+        exception := catch --unwind=(: not is_closing and not is_closed):
+          transport_.send packet
+          // Let pings jump the queue.
+          if should_send_ping_:
+            should_send_ping_ = false
+            transport_.send PingReqPacket
+        if exception:
+          assert: is_closing or is_closed
+          throw CLIENT_CLOSED_EXCEPTION
+      finally: | is_exception exception |
+        if is_exception:
+          close --reason=exception
 
 
 /**
@@ -321,11 +263,12 @@ class ClientAdvanced:
   /** The client has been created. Handle has not been called yet. */
   static STATE_CREATED_ ::= 0
   /** The client is connecting. */
-  static STATE_CONNECTING_ ::= 1
+  static STATE_CONNECTING1_ ::= 1
+  static STATE_CONNECTING2_ ::= 2
   /** The client is connected. */
-  static STATE_CONNECTED_ ::= 2
+  static STATE_CONNECTED_ ::= 3
   /** The client is disconnected. */
-  static STATE_DISCONNECTED_ ::= 3
+  static STATE_DISCONNECTED_ ::= 4
   /**
   The client is disconnected and in the process of shutting down.
   This only happens once the current message has been handled. That is, once
@@ -342,14 +285,15 @@ class ClientAdvanced:
   logger_ /log.Logger?
 
   session_ /Session_? := null
+  session_connected_ /Barrier_ := Barrier_
+
   subscriptions_ /Map := {:}
 
   next_packet_id_/int? := 1
 
   pending_ / Map ::= {:}  // int -> Packet
-  closed_ /Barrier_ ::= Barrier_
 
-  handle_task_ /Task_? := null
+  closed_ /Barrier_ ::= Barrier_
 
   /**
   Constructs an MQTT client.
@@ -361,35 +305,68 @@ class ClientAdvanced:
     transport_ = transport
     logger_ = logger
 
-  start -> none
-      --background/bool=false
-      --on_error/Lambda
-      --on_packet/Lambda:
+  start --on_packet/Lambda -> none:
     if state_ != STATE_CREATED_: throw "INVALID_STATE"
     assert: not session_
-    session_ = Session_ transport_ options_ --logger=logger_
-    state_ = STATE_CONNECTING_
-    handle_task_ = task --background=background::
-      exception := handle_ --on_packet=on_packet
-      if exception: on_error.call exception
-    // Just catch the call to connect. If there is an error, then the `on_error` function
-    // reports it.
-    catch: session_.connect
+    session_ = Session_ transport_ --keep_alive=options_.keep_alive
+    connect_
+    handle_ --on_packet=on_packet
 
-  handle_ --on_packet/Lambda -> any:
+  handle_ --on_packet/Lambda -> none:
     try:
-      exception := session_.handle: | packet/Packet |
+      session_.handle: | packet/Packet |
         if packet is PublishPacket:
           on_packet.call packet
+        else if packet is ConnAckPacket:
+          handle_connack_ (packet as ConnAckPacket)
         else if packet is PacketIDAck:
           ack := packet as PacketIDAck
           id := ack.packet_id
+          // TODO(florian): implement persistence layer.
           pending_.remove id
               --if_absent=: logger_.info "unmatched packet id: $id"
-      return exception
     finally:
       tear_down_
       session_ = null
+
+  connect_:
+    state_ = STATE_CONNECTING1_
+    packet := ConnectPacket options_.client_id
+        --username=options_.username
+        --password=options_.password
+        --keep_alive=options_.keep_alive
+        --last_will=options_.last_will
+    session_.write_ packet
+    state_ = STATE_CONNECTING2_
+
+  handle_connack_ packet/ConnAckPacket:
+    if state_ != STATE_CONNECTING2_:
+      if logger_: logger_.info "Received spurious CONNACK"
+      return
+
+    if packet.return_code != 0:
+      state_ = STATE_CLOSED_
+      session_connected_.set "connection refused: $packet.return_code"
+      return
+
+    state_ = STATE_CONNECTED_
+    session_connected_.set null
+
+  /**
+  Waits for the session to be connected and then calls the given $block.
+
+  If the session could not connect throws.
+  If the session is closed throws.
+  */
+  when_connected [block]:
+    check_connected_
+    block.call
+
+  check_connected_:
+    exception := session_connected_.get
+    if exception: throw exception
+    // Check that we are still connected and haven't been closed in the meantime.
+    if not session_.is_alive: throw CLIENT_CLOSED_EXCEPTION
 
   /**
   Tears down the client.
@@ -397,6 +374,8 @@ class ClientAdvanced:
   tear_down_:
     state_ = STATE_CLOSED_
     closed_.set true
+    if not session_connected_.has_value:
+      session_connected_.set CLIENT_CLOSED_EXCEPTION
 
   /**
   Closes the client.
@@ -410,7 +389,7 @@ class ClientAdvanced:
 
     // Note that disconnect packets don't need a packet id (which is important as
     // the packet_id counter is used as marker that the client is closed).
-    if session_.is_connected:
+    if session_.is_alive:
       catch --trace: session_.send DisconnectPacket
 
     // The session disconnect will stop the $Session_.handle. This in turn will invoke
@@ -476,6 +455,8 @@ class ClientAdvanced:
     // Not implemented yet.
 
   send_ packet/Packet --packet_id/int? -> none:
+    if packet is ConnectPacket: throw "INVALID_PACKET"
+    check_connected_
     session_.send packet
     if packet_id: pending_[packet_id] = packet
 
@@ -609,21 +590,24 @@ class Client:
         --last_will=last_will
     advanced_ = ClientAdvanced --options=options --transport=transport --logger=logger
 
-  start --on_error/Lambda=(:: logger_.error it) -> none:
+  start --attached/bool:
+    if not attached: throw "INVALID_ARGUMENT"
     advanced_.start
-        --on_error = on_error
-        --on_packet = :: handle_packet_ it --on_error=on_error
+        --on_packet = :: handle_packet_ it
 
-  handle_packet_ packet/Packet --on_error/Lambda:
+  start --detached/bool --background/bool=false --on_error/Lambda=(:: logger_.error it) -> none:
+    if not detached: throw "INVALID_ARGUMENT"
+    task --background=background::
+      exception := catch: start --attached
+      if exception: on_error.call exception
+    advanced_.when_connected: return
+
+  handle_packet_ packet/Packet:
     // We ack the packet as soon as we call the registered callback.
     // This ensures that packets are acked in order (as required by the MQTT protocol).
     // It does not guarantee that the packet was correctly handled. If the callback
     // throws, the packet is not handled again.
-    exception := catch --trace:
-      advanced_.ack packet
-    if exception:
-      on_error.call exception
-      return
+    advanced_.ack packet
 
     if packet is PublishPacket:
       publish := packet as PublishPacket

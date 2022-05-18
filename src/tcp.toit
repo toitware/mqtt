@@ -36,7 +36,7 @@ abstract class TcpTransport implements Transport:
   constructor.from_subclass_:
 
   abstract send packet/Packet
-  abstract receive --timeout/Duration?=null -> Packet?
+  abstract receive -> Packet?
   abstract close -> none
   abstract supports_reconnect -> bool
   abstract reconnect -> none
@@ -59,11 +59,8 @@ class SocketTransport_ extends TcpTransport:
   send packet/Packet:
     writer_.write packet.serialize
 
-  receive --timeout/Duration?=null -> Packet?:
-    catch --unwind=(: it != DEADLINE_EXCEEDED_ERROR):
-      with_timeout timeout:
-        return Packet.deserialize reader_
-    return null
+  receive -> Packet?:
+    return Packet.deserialize reader_
 
   close -> none:
     socket_.close
@@ -96,11 +93,8 @@ class ReconnectingTransport_ extends TcpTransport:
   send packet/Packet:
     writer_.write packet.serialize
 
-  receive --timeout/Duration?=null -> Packet?:
-    catch --unwind=(: it != DEADLINE_EXCEEDED_ERROR):
-      with_timeout timeout:
-        return Packet.deserialize reader_
-    return null
+  receive -> Packet?:
+    return Packet.deserialize reader_
 
   reconnect:
     // TODO(florian): implement retries and exponential back-off.
