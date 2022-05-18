@@ -124,30 +124,29 @@ monitor Token_ implements Token:
   wait_for_sent:
     await: state_ & STATE_SENT_ != 0 or state_ & STATE_EXCEPTION_ != 0
 
+/**
+An unbounded writer queue.
+
+The callers are required to wait for the tokens to be written before they can add
+  a new packet. As such the queue should never grow to a size greater than the
+  number of tasks.
+*/
 monitor WriterQueue_:
   // TODO(florian): we could prioritize Acks and pings.
   queue_ / Deque := Deque // of $Token.
 
-  capacity /int
-
-  constructor .capacity:
-
   add packet/Packet -> Token:
-    await: size_ < capacity
     token := Token_ packet
     queue_.add token
     token.update_state Token_.STATE_QUEUED_
     return token
 
   size -> int:
-    return size_
+    return queue_.size
 
   get -> Token_:
     await: not empty_
     return queue_.remove_first
-
-  size_ -> int:
-    return queue_.size
 
   empty_ -> bool:
     return queue_.is_empty
@@ -211,12 +210,11 @@ class Session_:
   ping_task_ /Task_? := null
   writer_task_ /Task_? := null
 
-  writer_queue_ /WriterQueue_ := ?
+  writer_queue_ /WriterQueue_ := WriterQueue_
 
-  constructor transport/Transport .options_ --logger/log.Logger? --outgoing_capacity/int:
+  constructor transport/Transport .options_ --logger/log.Logger?:
     logger_ = logger
     transport_ = ActivityMonitoringTransport_(transport)
-    writer_queue_ = WriterQueue_ outgoing_capacity
 
   is_connected -> bool: return state_ == STATE_CONNECTED_
   is_connecting -> bool:
@@ -241,7 +239,7 @@ class Session_:
     if not is_connected: throw CLIENT_CLOSED_EXCEPTION
 
   /**
-  Connects to the server and handles incoming packets.
+  Connects to the server and receives incoming packets.
 
   Only returns when the session is closed.
   Returns null if the session is cleanly closed.
@@ -375,7 +373,6 @@ class Session_:
         token.update_state Token_.STATE_SENT_
       if exception: break
 
-
   write_ packet/Packet:
     exception := catch --trace=(: should_trace_exception_ it):
       transport_.send packet
@@ -391,7 +388,6 @@ MQTT v3.1.1 Client with support for QoS 0 and 1.
 */
 class ClientAdvanced:
   static DEFAULT_KEEP_ALIVE ::= Duration --s=60
-  static DEFAULT_OUTGOING_CAPACITY ::= 8
 
   /** The client has been created. Handle has not been called yet. */
   static STATE_CREATED_ ::= 0
@@ -442,7 +438,7 @@ class ClientAdvanced:
       --on_packet/Lambda:
     if state_ != STATE_CREATED_: throw "INVALID_STATE"
     assert: not session_
-    session_ = Session_ transport_ options_ --logger=logger_ --outgoing_capacity=DEFAULT_OUTGOING_CAPACITY
+    session_ = Session_ transport_ options_ --logger=logger_
     state_ = STATE_CONNECTING_
     handle_task_ = task --background=background::
       exception := handle_ --on_packet=on_packet
@@ -455,13 +451,7 @@ class ClientAdvanced:
     try:
       exception := session_.handle: | packet/Packet |
         if packet is PublishPacket:
-          publish := packet as PublishPacket
-          topic := publish.topic
-          payload := publish.payload
           on_packet.call packet
-          if publish.packet_id:
-            ack := PubAckPacket publish.packet_id
-            session_.send ack
         else if packet is PacketIDAck:
           ack := packet as PacketIDAck
           id := ack.packet_id
@@ -479,12 +469,13 @@ class ClientAdvanced:
   Tears down the client.
   */
   tear_down_:
-    pending_.do --values: it.set null
+    pending_.do --values: | token / Token_ |
+      token.set_exception CLIENT_CLOSED_EXCEPTION
     state_ = STATE_CLOSED_
     closed_.set true
 
   /**
-  Closes the MQTT client.
+  Closes the client.
 
   Unless the client is already closed, executes an orderly disconnect.
   */
@@ -546,14 +537,10 @@ class ClientAdvanced:
 
   /**
   Subscribes to the given list $topic_filters of type $TopicFilter.
-
-  All messages that are received this way are delivered to the `on_packet` lambda
-    given to $start.
   */
   subscribe_all topic_filters/List -> Token:
     if topic_filters.is_empty: throw "INVALID_ARGUMENT"
     if is_closed: throw CLIENT_CLOSED_EXCEPTION
-    // TODO(florian): can we match topics to callbacks?
     packet_id := next_packet_id_++
     packet := SubscribePacket topic_filters --packet_id=packet_id
     return send_ packet --packet_id=packet_id
@@ -569,15 +556,23 @@ class ClientAdvanced:
     if packet_id: pending_[packet_id] = token
     return token
 
-  static should_trace_exception_ exception/any -> bool:
-    if exception == "NOT_CONNECTED": return false
-    if exception == reader.UNEXPECTED_END_OF_READER_EXCEPTION: return false
-    return true
+  ack packet/Packet:
+    if packet is PacketIDAck:
+      id := (packet as PacketIDAck).packet_id
+      ack := PubAckPacket id
+      session_.send ack
+
+
+class CallbackEntry_:
+  callback /Lambda
+  max_qos /int
+  is_subscribed /bool := true
+
+  constructor .callback .max_qos:
 
 class SubscriptionTreeNode_:
   topic_level /string
-  callback /Lambda? := null
-  max_qos /int? := null
+  callback_entry_ /CallbackEntry_? := null
   children /Map ::= {:}  // string -> SubscriptionTreeNode_?
 
   constructor .topic_level:
@@ -591,20 +586,24 @@ class SubscriptionTree_:
   /**
   Inserts, or replaces the callback for the given topic.
 
-  Returns the old qos. Null if there was no callback.
+  Returns the old callback entry. Null if there was none.
   */
-  add topic/string callback/Lambda --max_qos/int -> int?:
+  add topic/string callback_entry/CallbackEntry_ -> CallbackEntry_?:
     if topic == "": throw "INVALID_ARGUMENT"
     topic_levels := topic.split "/"
     node /SubscriptionTreeNode_ := root
     topic_levels.do: | topic_level |
       node = node.children.get topic_level --init=: SubscriptionTreeNode_ topic_level
-    result := node.max_qos
-    node.callback = callback
-    node.max_qos = max_qos
+    result := node.callback_entry_
+    node.callback_entry_ = callback_entry
     return result
 
-  remove topic/string -> none:
+  /**
+  Removes the callback for the given topic.
+
+  Returns the old callback entry. Null if there was none.
+  */
+  remove topic/string -> CallbackEntry_?:
     if topic == "": throw "INVALID_ARGUMENT"
     topic_levels := topic.split "/"
     node /SubscriptionTreeNode_? := root
@@ -613,35 +612,39 @@ class SubscriptionTree_:
     parent_to_remove_from /SubscriptionTreeNode_? := root
     topic_level_to_remove /string? := null
     topic_levels.do: | topic_level |
-      if node.callback or node.children.size > 1:
+      if node.callback_entry_ or node.children.size > 1:
         parent_to_remove_from = node
         topic_level_to_remove = topic_level
 
       node = node.children.get topic_level --if_absent=: throw "NOT SUBSCRIBED TO $topic"
 
+    result := node.callback_entry_
     if node.children.is_empty:
       parent_to_remove_from.children.remove topic_level_to_remove
     else:
-      node.callback = null
-      node.max_qos = null
+      node.callback_entry_ = null
 
-  find topic/string -> Lambda:
+    return result
+
+  find topic/string -> CallbackEntry_?:
     if topic == "": throw "INVALID_ARGUMENT"
     topic_levels := topic.split "/"
     node /SubscriptionTreeNode_ := root
-    catch_all_callback /Lambda? := null
+    catch_all_callback /CallbackEntry_? := null
     topic_levels.do: | topic_level |
       catch_all_node := node.children.get "#"
-      if catch_all_node: catch_all_callback = catch_all_node.callback
+      if catch_all_node: catch_all_callback = catch_all_node.callback_entry_
 
       node = node.children.get topic_level
       if not node: node = node.children.get "+"
-      if not node and not catch_all_callback: throw "NOT SUBSCRIBED TO $topic"
+      if not node and not catch_all_callback: return null
       if not node: return catch_all_callback
-    if node.callback: return node.callback
+    if node.callback_entry_: return node.callback_entry_
     return catch_all_callback
 
 class Client:
+  static DEFAULT_INCOMING_CAPACITY ::= 8
+
   advanced_ /ClientAdvanced
 
   subscription_callbacks_ /SubscriptionTree_ := SubscriptionTree_
@@ -686,13 +689,38 @@ class Client:
   start --on_error/Lambda=(:: logger_.error it) -> none:
     advanced_.start
         --on_error = on_error
-        --on_packet = :: | packet |
-          exception := catch --trace:
-            topic := packet.topic
-            payload := packet.payload
-            callback := subscription_callbacks_.find topic
-            callback.call packet.topic packet.payload
-          if exception: on_error.call exception
+        --on_packet = :: handle_packet_ it --on_error=on_error
+
+  handle_packet_ packet/Packet --on_error/Lambda:
+    // We ack the packet as soon as we call the registered callback.
+    // This ensures that packets are acked in order (as required by the MQTT protocol).
+    // It does not guarantee that the packet was correctly handled. If the callback
+    // throws, the packet is not handled again.
+    exception := catch --trace:
+      advanced_.ack packet
+    if exception:
+      on_error.call exception
+      return
+
+    if packet is PublishPacket:
+      publish := packet as PublishPacket
+      topic := publish.topic
+      payload := publish.payload
+      callback := subscription_callbacks_.find topic
+      if callback:
+        callback.callback.call topic payload
+      else:
+        // This can happen when the user unsubscribed from this topic but the
+        // packet was already in the incoming queue.
+        logger_.info "Received packet for unregistered topic $topic"
+      return
+
+    if packet is SubAckPacket:
+      suback := packet as SubAckPacket
+      if (suback.qos == 0x80):
+        logger_.error "At least one subscription failed"
+
+    // Ignore all other packets.
 
   is_closed -> bool:
     return advanced_.is_closed
@@ -707,6 +735,9 @@ class Client:
 
   QoS = 2 (exactly once) is not implemented by this client.
 
+  This method returns as soon as the message was written to the transport. It does *not* wait until
+    the broker has returned with an acknowledgment.
+
   The $retain parameter lets the MQTT broker know whether it should retain this message. A new (later)
     subscription to this $topic would receive the retained message, instead of needing to wait for
     a new message on that topic.
@@ -716,12 +747,8 @@ class Client:
   publish topic/string payload/ByteArray --qos=1 --retain=false:
     token := advanced_.publish topic payload --qos=qos --retain=retain
 
-    if qos == 0:
-      token.wait_for_sent
-      if token.exception: throw token.exception
-    else:
-      token.wait_for_ack
-      if token.exception: throw token.exception
+    token.wait_for_sent
+    if token.exception: throw token.exception
 
   /**
   Subscribes to a single topic $filter, with the provided $max_qos.
@@ -737,12 +764,16 @@ class Client:
     topic_filters := [ TopicFilter filter --max_qos=max_qos ]
     if topic_filters.is_empty: throw "INVALID_ARGUMENT"
 
-    old_qos := subscription_callbacks_.add filter callback --max_qos=max_qos
-    if old_qos == max_qos:
+    callback_entry := CallbackEntry_ callback max_qos
+    old_entry := subscription_callbacks_.add filter callback_entry
+    if old_entry:
+      old_entry.is_subscribed = false
+      if old_entry.max_qos == max_qos:
       // Just a simple change of callback.
       return
+
     token := advanced_.subscribe_all topic_filters
-    token.wait_for_ack
+    token.wait_for_sent
 
   /**
   Unsubscribes from a single topic $filter.
