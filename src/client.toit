@@ -148,8 +148,6 @@ class Session_:
 
   closing_reason_ /any := null
 
-  ticket_queue_ /TicketQueue_ := TicketQueue_
-
   writing_ /monitor.Mutex ::= monitor.Mutex
 
   constructor transport/Transport --keep_alive/Duration:
@@ -222,7 +220,7 @@ class Session_:
       return remaining_keep_alive
     else if not transport_.is_sending:
       // TODO(florian): we need to keep track of whether we have sent a ping.
-      write_ PingReqPacket
+      send PingReqPacket
       return keep_alive_ / 2
     else:
       // TODO(florian): we are currently sending.
@@ -231,10 +229,6 @@ class Session_:
       return keep_alive_
 
   send packet/Packet:
-    ticket_queue_.do:
-      write_ packet
-
-  write_ packet/Packet:
     // The writers should already be serialized by the Client, but we sometimes send
     // a ping packet from the handler. This packet is so small that it is unlikely that it
     // would be interleaved, but to be sure we have a lock here.
@@ -295,6 +289,8 @@ class ClientAdvanced:
 
   closed_ /Barrier_ ::= Barrier_
 
+  send_queue_ /TicketQueue_ := TicketQueue_
+
   /**
   Constructs an MQTT client.
 
@@ -336,7 +332,7 @@ class ClientAdvanced:
         --password=options_.password
         --keep_alive=options_.keep_alive
         --last_will=options_.last_will
-    session_.write_ packet
+    session_.send packet
     state_ = STATE_CONNECTING2_
 
   handle_connack_ packet/ConnAckPacket:
@@ -455,10 +451,11 @@ class ClientAdvanced:
     // Not implemented yet.
 
   send_ packet/Packet --packet_id/int? -> none:
-    if packet is ConnectPacket: throw "INVALID_PACKET"
-    check_connected_
-    session_.send packet
-    if packet_id: pending_[packet_id] = packet
+    send_queue_.do:
+      if packet is ConnectPacket: throw "INVALID_PACKET"
+      check_connected_
+      session_.send packet
+      if packet_id: pending_[packet_id] = packet
 
   ack packet/Packet:
     if packet is PacketIDAck:
