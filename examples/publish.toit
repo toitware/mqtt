@@ -10,8 +10,8 @@ main:
   socket := net.open.tcp_connect "127.0.0.1" 1883
 
   client := mqtt.Client
-    "toit-publish"
-    mqtt.TcpTransport socket
+    --client_id = "toit-publish"
+    --transport = mqtt.TcpTransport socket
 
   client.start
   print "connected to broker"

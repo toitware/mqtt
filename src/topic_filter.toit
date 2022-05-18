@@ -8,6 +8,14 @@ A topic filter for subscribing to MQTT topics.
 */
 class TopicFilter:
   filter/string
-  qos/int
+  max_qos/int
 
-  constructor .filter --.qos=1:
+  /**
+  Constructs a topic filter.
+
+  The chosen $max_qos is the maximum QoS the client will receive. The broker
+    generally sends a packet to subscribers with the same QoS as the one it
+    received it with. The $max_qos parameter sets a limit on which QoS the client
+    wants to receive.
+  */
+  constructor .filter --.max_qos=1:
