@@ -35,32 +35,28 @@ abstract class TcpTransport implements Transport:
 
   constructor.from_subclass_:
 
-  abstract send packet/Packet
-  abstract receive -> Packet?
+  abstract write bytes/ByteArray -> int
+  abstract read -> ByteArray?
   abstract close -> none
   abstract supports_reconnect -> bool
   abstract reconnect -> none
 
 class SocketTransport_ extends TcpTransport:
   socket_ /tcp.Socket
-  writer_ /writer.Writer
-  reader_ /reader.BufferedReader
 
   transport_ /TcpTransport? := null
   reconnecting_mutex /monitor.Mutex? := null
 
   constructor .socket_:
-    writer_ = writer.Writer socket_
-    reader_ = reader.BufferedReader socket_
     // Send messages immediately.
     socket_.set_no_delay true
     super.from_subclass_
 
-  send packet/Packet:
-    writer_.write packet.serialize
+  write bytes/ByteArray -> int:
+    return socket_.write bytes
 
-  receive -> Packet?:
-    return Packet.deserialize reader_
+  read -> ByteArray?:
+    return socket_.read
 
   close -> none:
     socket_.close
@@ -79,8 +75,6 @@ class ReconnectingTransport_ extends TcpTransport:
 
   // The current connection.
   socket_ /tcp.Socket? := null
-  writer_ /writer.Writer? := null
-  reader_ /reader.BufferedReader? := null
 
   reconnecting_mutex /monitor.Mutex := monitor.Mutex
 
@@ -90,11 +84,11 @@ class ReconnectingTransport_ extends TcpTransport:
     super.from_subclass_
     reconnect
 
-  send packet/Packet:
-    writer_.write packet.serialize
+  write bytes/ByteArray -> int:
+    return socket_.write bytes
 
-  receive -> Packet?:
-    return Packet.deserialize reader_
+  read -> ByteArray?:
+    return socket_.read
 
   reconnect:
     // TODO(florian): implement retries and exponential back-off.
@@ -105,8 +99,6 @@ class ReconnectingTransport_ extends TcpTransport:
       if old_socket: old_socket.close
 
       socket := new_connection_
-      writer_ = writer.Writer socket
-      reader_ = reader.BufferedReader socket
       // Send messages immediately.
       socket.set_no_delay true
 
@@ -120,8 +112,6 @@ class ReconnectingTransport_ extends TcpTransport:
   close:
     if socket_: socket_.close
     socket_ = null
-    writer_ = null
-    reader_ = null
 
   supports_reconnect -> bool:
     return true

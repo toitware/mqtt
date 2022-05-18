@@ -5,6 +5,7 @@
 import monitor
 import log
 import reader
+import writer
 
 import .transport
 import .packets
@@ -58,17 +59,18 @@ class ActivityMonitoringTransport_ implements Transport:
 
   constructor .wrapped_transport_:
 
-  send packet/Packet:
+  write bytes/ByteArray -> int:
     try:
       is_sending = true
       sending_since = Time.monotonic_us
-      wrapped_transport_.send packet
+      result := wrapped_transport_.write bytes
       last_sent_us = Time.monotonic_us
+      return result
     finally:
       is_sending = false
 
-  receive -> Packet?:
-    return wrapped_transport_.receive
+  read -> ByteArray?:
+    return wrapped_transport_.read
 
   close -> none:
     wrapped_transport_.close
@@ -167,9 +169,10 @@ class Session_:
 
     try:
       catch --unwind=(: not is_closing and not is_closed):
+        reader := reader.BufferedReader transport_
         while not is_closing:
-          packet := transport_.receive
-          if packet: block.call packet
+          packet := Packet.deserialize reader
+          block.call packet
     finally: | is_exception exception |
       close --reason=(is_exception ? exception : null)
       tear_down
@@ -225,11 +228,12 @@ class Session_:
     writing_.do:
       try:
         exception := catch --unwind=(: not is_closing and not is_closed):
-          transport_.send packet
+          writer := writer.Writer transport_
+          writer.write packet.serialize
           // Let pings jump the queue.
           if should_send_ping_:
             should_send_ping_ = false
-            transport_.send PingReqPacket
+            transport_.write (PingReqPacket).serialize
         if exception:
           assert: is_closing or is_closed
           throw CLIENT_CLOSED_EXCEPTION

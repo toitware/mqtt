@@ -3,30 +3,31 @@
 // found in the LICENSE file.
 
 import .packets
+import reader
 
 /**
 The backing transport for the MQTT client.
 */
-interface Transport:
+interface Transport implements reader.Reader:
   /**
-  Sends a packet to the peer.
+  Write to the transport.
+
+  Returns the number of bytes written.
   */
-  send packet/Packet -> none
+  write bytes/ByteArray -> int
 
   /**
-  Receives the next packet from the peer.
-
-  Returns null if timeout was exceeded.
+  Receives bytes from the peer.
   */
-  receive -> Packet?
+  read -> ByteArray?
 
   /**
   Closes the transport.
 
   If another task is sending or receiving, that operation must throw.
-  Any future $send or $receive calls must throw.
+  Any future $write or $read calls must throw.
 
-  The disconnection operation itself must not throw.
+  The close operation itself must not throw.
   // TODO(florian): should we deal with disconnections that can throw?
   */
   close -> none
