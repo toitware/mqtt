@@ -143,8 +143,9 @@ class Session_:
 
   keep_alive_ /Duration
   should_send_ping_ /bool := false
-  transport_ / ActivityMonitoringTransport_
   activity_task_ /Task_? := null
+
+  transport_ / ActivityMonitoringTransport_
 
   closing_reason_ /any := null
 
@@ -544,8 +545,6 @@ class SubscriptionTree_:
     return catch_all_callback
 
 class Client:
-  static DEFAULT_INCOMING_CAPACITY ::= 8
-
   advanced_ /ClientAdvanced
 
   subscription_callbacks_ /SubscriptionTree_ := SubscriptionTree_

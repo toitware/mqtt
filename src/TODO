@@ -1,5 +1,5 @@
-- make sure that acks are in order.
 - prepare persistency
+- unsubscribe
 
 Tests:
 - test that ping packet can't be interleaved with other packets.
