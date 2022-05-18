@@ -5,3 +5,7 @@ Tests:
 - test that ping packet can't be interleaved with other packets.
 - last will message.
 - client callback takes longer than ping time.
+- topics:
+  * /foo
+  * foo/#
+  * foo/+/bar

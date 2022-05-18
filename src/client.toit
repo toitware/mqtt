@@ -112,15 +112,6 @@ monitor TicketQueue_:
 
 class Session_:
   /**
-  Overhead room to give pings time to reach the server.
-  The MQTT protocol requires activity from the client within a keep-alive duration.
-  We send our ping a bit earlier to give communication time to reach the server. Servers
-    generally give the clients some slack too, but there is no harm in being a bit eager on
-    pings.
-  */
-  static KEEP_ALIVE_OVERHEAD_ROOM_US_ ::= 500_000
-
-  /**
   The session is considered alive.
   This could be because we haven't tried to establish a connection, but it
     could also be that we are happily running.
@@ -156,8 +147,8 @@ class Session_:
     transport_ = ActivityMonitoringTransport_(transport)
 
   is_alive -> bool: return state_ == STATE_ALIVE_
-  is_closed -> bool: return state_ == STATE_CLOSED_
   is_closing -> bool: return state_ == STATE_CLOSING_
+  is_closed -> bool: return state_ == STATE_CLOSED_
 
   /**
   Connects to the server and receives incoming packets.
@@ -214,8 +205,6 @@ class Session_:
     // We should monitor when the transport starts writing, and when it gets a chunk through.
     // Also, we should monitor that we actually get something from the server.
     remaining_keep_alive_us := keep_alive_.in_us - (Time.monotonic_us - transport_.last_sent_us)
-    // Decrease it to give some room for overhead.
-    remaining_keep_alive_us -= KEEP_ALIVE_OVERHEAD_ROOM_US_
     if remaining_keep_alive_us > 0:
       remaining_keep_alive := Duration --us=remaining_keep_alive_us
       return remaining_keep_alive
