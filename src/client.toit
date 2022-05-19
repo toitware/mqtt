@@ -206,7 +206,7 @@ class Connection_:
       return keep_alive_
 
   send packet/Packet:
-    // The writers should already be serialized by the Client, but we sometimes send
+    // The writers should already be serialized by the session, but we sometimes send
     // a ping packet from the handler. This packet is so small that it is unlikely that it
     // would be interleaved, but to be sure we have a lock here.
     writing_.do:
@@ -227,27 +227,32 @@ class Connection_:
 
 
 /**
-MQTT v3.1.1 Client with support for QoS 0 and 1.
-*/
-class ClientAdvanced:
-  static DEFAULT_KEEP_ALIVE ::= Duration --s=60
+An MQTT session.
 
-  /** The client has been created. Handle has not been called yet. */
+The session is responsible for maintaining the connection to the server.
+If necessary it reconnects to the server.
+
+When the connection to the broker is established with the clean-session bit, the session
+  resubscribes all its subscriptions. However, due to the bit, there might be some
+  messages that are lost.
+*/
+class Session:
+  /** The session has been created. Handle has not been called yet. */
   static STATE_CREATED_ ::= 0
-  /** The client is connecting. */
+  /** The session is connecting. */
   static STATE_CONNECTING1_ ::= 1
   static STATE_CONNECTING2_ ::= 2
-  /** The client is connected. */
+  /** The session is connected. */
   static STATE_CONNECTED_ ::= 3
-  /** The client is disconnected. */
+  /** The session is disconnected. */
   static STATE_DISCONNECTED_ ::= 4
   /**
-  The client is disconnected and in the process of shutting down.
+  The session is disconnected and in the process of shutting down.
   This only happens once the current message has been handled. That is, once
     the $handle_ method's block has returned.
   */
   static STATE_CLOSING_ ::= 4
-  /** The client is closed. */
+  /** The session is closed. */
   static STATE_CLOSED_ ::= 5
 
   state_ /int := STATE_CREATED_
@@ -277,9 +282,9 @@ class ClientAdvanced:
   sending_ / monitor.Mutex := monitor.Mutex
 
   /**
-  Constructs an MQTT client.
+  Constructs an MQTT session.
 
-  The client starts disconnected. Call $start to initiate the connection.
+  The session starts disconnected. Call $start to initiate the connection.
   */
   constructor --options/ClientOptions --transport/Transport --logger/log.Logger?:
     options_ = options
@@ -316,7 +321,6 @@ class ClientAdvanced:
       connection_ = null
 
   reconnect_ --reason --old_connection/Connection_ -> none:
-    print "reconnecting"
     if is_closing or is_closed: return
 
     assert: not connection_.is_alive
@@ -392,7 +396,7 @@ class ClientAdvanced:
     if not connection_.is_alive: throw CLIENT_CLOSED_EXCEPTION
 
   /**
-  Tears down the client.
+  Tears down the session.
   */
   tear_down_:
     state_ = STATE_CLOSED_
@@ -401,9 +405,9 @@ class ClientAdvanced:
       connected_.set CLIENT_CLOSED_EXCEPTION
 
   /**
-  Closes the client.
+  Closes the session.
 
-  Unless the client is already closed, executes an orderly disconnect.
+  Unless the session is already closed, executes an orderly disconnect.
   */
   close:
     if is_closing or is_closed: return
@@ -411,7 +415,7 @@ class ClientAdvanced:
     state_ = STATE_CLOSING_
 
     // Note that disconnect packets don't need a packet id (which is important as
-    // the packet_id counter is used as marker that the client is closed).
+    // the packet_id counter is used as marker that the session is closed).
     if connection_.is_alive:
       catch --trace: connection_.send DisconnectPacket
 
@@ -422,7 +426,7 @@ class ClientAdvanced:
     closed_.get
 
   /**
-  Whether the client is closed.
+  Whether the session is closed.
   */
   is_closed -> bool:
     return state_ == STATE_CLOSED_
@@ -497,10 +501,11 @@ class ClientAdvanced:
         reconnect_ --reason=exception --old_connection=current_connection
 
   ack packet/Packet:
-    if packet is PacketIDAck:
-      id := (packet as PacketIDAck).packet_id
-      ack := PubAckPacket id
-      connection_.send ack
+    if packet is PublishPacket:
+      id := (packet as PublishPacket).packet_id
+      if id:
+        ack := PubAckPacket id
+        connection_.send ack
 
 
 class CallbackEntry_:
@@ -583,7 +588,9 @@ class SubscriptionTree_:
     return catch_all_callback
 
 class Client:
-  advanced_ /ClientAdvanced
+  static DEFAULT_KEEP_ALIVE ::= Duration --s=60
+
+  session_ /Session
 
   subscription_callbacks_ /SubscriptionTree_ := SubscriptionTree_
   logger_ /log.Logger?
@@ -614,7 +621,7 @@ class Client:
       --logger /log.Logger? = log.default
       --username /string? = null
       --password /string? = null
-      --keep_alive /Duration = ClientAdvanced.DEFAULT_KEEP_ALIVE
+      --keep_alive /Duration = DEFAULT_KEEP_ALIVE
       --last_will /LastWill? = null:
     logger_ = logger
     options := ClientOptions client_id
@@ -622,11 +629,11 @@ class Client:
         --password=password
         --keep_alive=keep_alive
         --last_will=last_will
-    advanced_ = ClientAdvanced --options=options --transport=transport --logger=logger
+    session_ = Session --options=options --transport=transport --logger=logger
 
   start --attached/bool:
     if not attached: throw "INVALID_ARGUMENT"
-    advanced_.start
+    session_.start
         --on_packet = :: handle_packet_ it
 
   start --detached/bool --background/bool=false --on_error/Lambda=(:: logger_.error it) -> none:
@@ -634,14 +641,14 @@ class Client:
     task --background=background::
       exception := catch: start --attached
       if exception: on_error.call exception
-    advanced_.when_connected: return
+    session_.when_connected: return
 
   handle_packet_ packet/Packet:
     // We ack the packet as soon as we call the registered callback.
     // This ensures that packets are acked in order (as required by the MQTT protocol).
     // It does not guarantee that the packet was correctly handled. If the callback
     // throws, the packet is not handled again.
-    advanced_.ack packet
+    session_.ack packet
 
     if packet is PublishPacket:
       publish := packet as PublishPacket
@@ -664,7 +671,7 @@ class Client:
     // Ignore all other packets.
 
   is_closed -> bool:
-    return advanced_.is_closed
+    return session_.is_closed
 
   /**
   Publishes an MQTT message on $topic.
@@ -686,7 +693,7 @@ class Client:
   Not all MQTT brokers support $retain.
   */
   publish topic/string payload/ByteArray --qos=1 --retain=false:
-    advanced_.publish topic payload --qos=qos --retain=retain
+    session_.publish topic payload --qos=qos --retain=retain
 
   /**
   Subscribes to a single topic $filter, with the provided $max_qos.
@@ -710,7 +717,7 @@ class Client:
       // Just a simple change of callback.
       return
 
-    advanced_.subscribe_all topic_filters
+    session_.subscribe_all topic_filters
 
   /**
   Unsubscribes from a single topic $filter.
@@ -718,7 +725,7 @@ class Client:
   The client must be connected to the $filter.
   */
   unsubscribe filter/string -> none:
-    advanced_.unsubscribe filter
+    session_.unsubscribe filter
 
   close -> none:
-    advanced_.close
+    session_.close
