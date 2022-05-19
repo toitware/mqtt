@@ -9,3 +9,7 @@ Tests:
   * /foo
   * foo/#
   * foo/+/bar
+
+- in case of not-clean session.
+  * resend ack of message with qos.
+  * receive message with qos again, after reconnect.

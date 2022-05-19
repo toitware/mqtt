@@ -160,13 +160,14 @@ class Session_:
   Throws otherwise.
   */
   handle [block]:
+    /*
     activity_task_ = task --background::
       catch:
         while is_alive:
           sleep_duration := check_activity_
           sleep sleep_duration
           activity_task_ = null
-
+*/
     try:
       catch --unwind=(: not is_closing and not is_closed):
         reader := reader.BufferedReader transport_
@@ -246,7 +247,7 @@ class Session_:
 MQTT v3.1.1 Client with support for QoS 0 and 1.
 */
 class ClientAdvanced:
-  static DEFAULT_KEEP_ALIVE ::= Duration --s=60
+  static DEFAULT_KEEP_ALIVE ::= Duration --s=5 // 60
 
   /** The client has been created. Handle has not been called yet. */
   static STATE_CREATED_ ::= 0
@@ -298,28 +299,40 @@ class ClientAdvanced:
   start --on_packet/Lambda -> none:
     if state_ != STATE_CREATED_: throw "INVALID_STATE"
     assert: not session_
-    session_ = Session_ transport_ --keep_alive=options_.keep_alive
     connect_
     handle_ --on_packet=on_packet
 
   handle_ --on_packet/Lambda -> none:
     try:
-      session_.handle: | packet/Packet |
-        if packet is PublishPacket:
-          on_packet.call packet
-        else if packet is ConnAckPacket:
-          handle_connack_ (packet as ConnAckPacket)
-        else if packet is PacketIDAck:
-          ack := packet as PacketIDAck
-          id := ack.packet_id
-          // TODO(florian): implement persistence layer.
-          pending_.remove id
-              --if_absent=: logger_.info "unmatched packet id: $id"
+      while true:
+        exception := catch:
+          session_.handle: | packet/Packet |
+            if packet is PublishPacket:
+              on_packet.call packet
+            else if packet is ConnAckPacket:
+              handle_connack_ (packet as ConnAckPacket)
+            else if packet is PacketIDAck:
+              ack := packet as PacketIDAck
+              id := ack.packet_id
+              // TODO(florian): implement persistence layer.
+              pending_.remove id
+                  --if_absent=: logger_.info "unmatched packet id: $id"
+        if exception and not (is_closed or is_closing):
+          // TODO(florian): implement exponential back-off or something similar.
+          reconnect_
     finally:
       tear_down_
       session_ = null
 
+  reconnect_:
+    // TODO(florian): add lock and ensure that either the receiver or the sender reconnects.
+    assert: not session_.is_alive
+    transport_.reconnect
+    session_connected_ = Barrier_
+    connect_
+
   connect_:
+    session_ = Session_ transport_ --keep_alive=options_.keep_alive
     state_ = STATE_CONNECTING1_
     packet := ConnectPacket options_.client_id
         --username=options_.username
@@ -341,6 +354,15 @@ class ClientAdvanced:
 
     state_ = STATE_CONNECTED_
     session_connected_.set null
+
+    // Before publishing messages, we need to subscribe to the topics we were subscribed to.
+    // TODO(florian): also send/clear pending acks.
+    // TODO(florian): move the sub call to the front of the queue.
+    if not subscriptions_.is_empty:
+      topic_list := []
+      subscriptions_.do: | topic/string max_qos/int |
+        topic_list.add (TopicFilter topic --max_qos=max_qos)
+      subscribe_all topic_list
 
   /**
   Waits for the session to be connected and then calls the given $block.
@@ -434,6 +456,10 @@ class ClientAdvanced:
   subscribe_all topic_filters/List -> none:
     if topic_filters.is_empty: throw "INVALID_ARGUMENT"
     if is_closed: throw CLIENT_CLOSED_EXCEPTION
+
+    topic_filters.do: | topic_filter/TopicFilter |
+      subscriptions_[topic_filter.filter] = topic_filter.max_qos
+
     packet_id := next_packet_id_++
     packet := SubscribePacket topic_filters --packet_id=packet_id
     send_ packet --packet_id=packet_id

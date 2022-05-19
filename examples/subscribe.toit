@@ -7,11 +7,13 @@ import net
 
 TOPIC ::= "toit/example/publish_subscribe"
 main:
-  socket := net.open.tcp_connect "127.0.0.1" 1883
+  transport := mqtt.TcpTransport net.open --host="127.0.0.1"
+  // socket := net.open.tcp_connect "127.0.0.1" 1883
+  // transport := mqtt.TcpTransport socket
 
   client := mqtt.Client
     --client_id = "toit-subscribe"
-    --transport = mqtt.TcpTransport socket
+    --transport = transport
 
   client.start --detached
   print "connected to broker"
