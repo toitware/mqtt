@@ -178,8 +178,13 @@ class Client:
     packet := SubscribePacket topic_filters --packet_id=packet_id
     wait_for_ack_ packet_id: | latch/monitor.Latch |
       send_ packet
-      ack := latch.get
-      if not ack: throw CLIENT_CLOSED_EXCEPTION
+      ack /SubAckPacket? := latch.get
+      if ack:
+        ack.qos.do:
+          if it == SubAckPacket.FAILED_SUBSCRIPTION_QOS:
+            throw "subscription failed"
+      else:
+        throw CLIENT_CLOSED_EXCEPTION
 
   /**
   Unsubscribe to a single topic $filter.

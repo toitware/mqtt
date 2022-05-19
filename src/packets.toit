@@ -229,6 +229,9 @@ class SubscribePacket extends Packet:
 class SubAckPacket extends Packet implements PacketIDAck:
   static TYPE ::= 9
 
+  /** The qos value for a failed subscription. */
+  static FAILED_SUBSCRIPTION_QOS ::= 0x80
+
   packet_id /int
   qos /List  // The list of qos matches the list of topics from the SubPacket.
 
@@ -237,12 +240,9 @@ class SubAckPacket extends Packet implements PacketIDAck:
 
   constructor.deserialize reader/reader.BufferedReader size/int:
     data := reader.read_bytes 2
+    size -= 2
     packet_id = binary.BIG_ENDIAN.uint16 data 0
-    consumed := 0
-    qos = []
-    while consumed < size:
-      qos.add reader.read_byte
-      if qos == 127: throw "QoS negotiation failed"
+    qos = List size: reader.read_byte
     super TYPE
 
   variable_header -> ByteArray:
