@@ -53,21 +53,21 @@ monitor Barrier_:
 
 class ActivityMonitoringTransport_ implements Transport:
   wrapped_transport_ / Transport
-  is_sending /bool := false
-  sending_since /int? := null
+  is_writing /bool := false
+  writing_since /int? := null
   last_sent_us /int? := null
 
   constructor .wrapped_transport_:
 
   write bytes/ByteArray -> int:
     try:
-      is_sending = true
-      sending_since = Time.monotonic_us
+      is_writing = true
+      writing_since = Time.monotonic_us
       result := wrapped_transport_.write bytes
       last_sent_us = Time.monotonic_us
       return result
     finally:
-      is_sending = false
+      is_writing = false
 
   read -> ByteArray?:
     return wrapped_transport_.read
@@ -97,13 +97,17 @@ class ClientOptions:
       --.last_will /LastWill?:
 
 class ActivityChecker_:
-  connection_ /Connection_? := null
+  session_ /Session
   keep_alive_ /Duration
+  current_connection_ /Connection_? := null
 
-  constructor --keep_alive/Duration:
+  constructor .session_ --keep_alive/Duration:
     keep_alive_ = keep_alive
 
-  connection= val: connection_ = val
+  reset:
+    // Currently do nearly nothing.
+    // We will want to reset our data.
+    current_connection_ = session_.connection_
 
   /**
   Checks for activity.
@@ -112,7 +116,9 @@ class ActivityChecker_:
   Returns null if the connection is not alive anymore.
   */
   check -> Duration?:
-    if not connection_.is_alive: return null
+    session_.check_connected_
+    if current_connection_ != session_.connection_:
+      reset
 
     // There should have been a 'connect' message.
     assert: transport_.is_sending or transport_.last_sent_us
@@ -128,18 +134,23 @@ class ActivityChecker_:
     if remaining_keep_alive_us > 0:
       remaining_keep_alive := Duration --us=remaining_keep_alive_us
       return remaining_keep_alive
-    else if not transport_.is_sending:
+    else if not session_.is_sending:
       // TODO(florian): we need to keep track of whether we have sent a ping.
-      connection_.send PingReqPacket
+      session_.send_ PingReqPacket --packet_id=null
       return keep_alive_ / 2
     else:
       // TODO(florian): we are currently sending.
       // We should detect timeouts on the sending.
-      connection_.request_ping_after_current_message
+      session_.request_ping_after_current_packet
       return keep_alive_
 
   transport_ -> ActivityMonitoringTransport_:
-    return connection_.transport_
+    return session_.transport_
+
+  run:
+    while not session_.is_closed and not session_.is_closing:
+      duration := check
+      sleep duration
 
 class Connection_:
   /**
@@ -163,22 +174,15 @@ class Connection_:
 
   state_ / int := STATE_ALIVE_
 
-  is_sending_ /bool := false
   should_send_ping_ /bool := false
 
-  activity_checker_ /ActivityChecker_
-  activity_task_ /Task_? := null
-
-  transport_ / ActivityMonitoringTransport_
+  transport_ / Transport
 
   closing_reason_ /any := null
 
   writing_ /monitor.Mutex ::= monitor.Mutex
 
-  constructor transport/Transport --keep_alive/Duration:
-    activity_checker_ = ActivityChecker_ --keep_alive=keep_alive
-    transport_ = ActivityMonitoringTransport_(transport)
-    activity_checker_.connection = this
+  constructor .transport_:
 
   is_alive -> bool: return state_ == STATE_ALIVE_
   is_closing -> bool: return state_ == STATE_CLOSING_
@@ -192,16 +196,6 @@ class Connection_:
   Throws otherwise.
   */
   handle [block]:
-    activity_task_ = task --background::
-      try:
-        catch:
-          while is_alive:
-            sleep_duration := activity_checker_.check
-            if sleep_duration:
-              sleep sleep_duration
-      finally:
-        activity_task_ = null
-
     try:
       catch --unwind=(: not is_closing and not is_closed):
         reader := reader.BufferedReader transport_
@@ -210,13 +204,7 @@ class Connection_:
           block.call packet
     finally: | is_exception exception |
       close --reason=(is_exception ? exception : null)
-      tear_down
       state_ = STATE_CLOSED_
-
-  tear_down:
-    if activity_task_:
-      activity_task_.cancel
-      activity_task_ = null
 
   close --reason=null:
     if is_closing or is_closed: return
@@ -230,15 +218,11 @@ class Connection_:
     assert: transport_
     should_send_ping_ = true
 
-  is_sending -> bool:
-    return is_sending_
-
   send packet/Packet:
     // The writers should already be serialized by the session, but we sometimes send
     // a ping packet from the handler. This packet is so small that it is unlikely that it
     // would be interleaved, but to be sure we have a lock here.
     writing_.do:
-      is_sending_ = true
       try:
         exception := catch --unwind=(: not is_closing and not is_closed):
           writer := writer.Writer transport_
@@ -251,7 +235,6 @@ class Connection_:
           assert: is_closing or is_closed
           throw CLIENT_CLOSED_EXCEPTION
       finally: | is_exception exception |
-        is_sending_ = false
         if is_exception:
           close --reason=exception
 
@@ -288,7 +271,7 @@ class Session:
   state_ /int := STATE_CREATED_
 
   options_ /ClientOptions
-  transport_ /Transport
+  transport_ /ActivityMonitoringTransport_
   logger_ /log.Logger?
 
   connection_ /Connection_? := null
@@ -301,6 +284,8 @@ class Session:
 
   pending_ / Map ::= {:}  // int -> Packet
 
+  activity_task_ /Task_? := null
+
   closed_ /Barrier_ ::= Barrier_
 
   /**
@@ -309,7 +294,9 @@ class Session:
   Relies on the fact that Toit mutexes are fair and execute them in the order
     in which they reached the mutex.
   */
-  sending_ / monitor.Mutex := monitor.Mutex
+  sending_ /monitor.Mutex := monitor.Mutex
+  is_sending_ /bool := false
+  should_send_ping_ /bool := false
 
   /**
   Constructs an MQTT session.
@@ -318,8 +305,9 @@ class Session:
   */
   constructor --options/ClientOptions --transport/Transport --logger/log.Logger?:
     options_ = options
-    transport_ = transport
+    transport_ = ActivityMonitoringTransport_(transport)
     logger_ = logger
+
 
   start --on_packet/Lambda -> none:
     if state_ != STATE_CREATED_: throw "INVALID_STATE"
@@ -329,6 +317,13 @@ class Session:
 
   handle_ --on_packet/Lambda -> none:
     try:
+      activity_task_ = task --background::
+        try:
+          checker := ActivityChecker_ this --keep_alive=options_.keep_alive
+          checker.run
+        finally:
+          activity_task_ = null
+
       while true:
         current_connection := connection_
         // TODO(florian): only catch if we can reconnect.
@@ -364,6 +359,7 @@ class Session:
       connected_.set reason
     connected_ = Barrier_
     connection_ = null
+    should_send_ping_ = false
     reconnect_done_ = monitor.Latch
     try:
       transport_.reconnect
@@ -372,7 +368,7 @@ class Session:
     connect_
 
   connect_:
-    connection_ = Connection_ transport_ --keep_alive=options_.keep_alive
+    connection_ = Connection_ transport_
     state_ = STATE_CONNECTING1_
     packet := ConnectPacket options_.client_id
         --username=options_.username
@@ -429,10 +425,14 @@ class Session:
   Tears down the session.
   */
   tear_down_:
-    state_ = STATE_CLOSED_
-    closed_.set true
-    if not connected_.has_value:
-      connected_.set CLIENT_CLOSED_EXCEPTION
+    critical_do:
+      state_ = STATE_CLOSED_
+      if activity_task_:
+        activity_task_.cancel
+        activity_task_ = null
+      closed_.set true
+      if not connected_.has_value:
+        connected_.set CLIENT_CLOSED_EXCEPTION
 
   /**
   Closes the session.
@@ -515,20 +515,33 @@ class Session:
   unsubscribe filter/string -> none:
     // Not implemented yet.
 
+  request_ping_after_current_packet:
+    should_send_ping_ = true
+
+  is_sending -> bool:
+    return is_sending_
+
   send_ packet/Packet --packet_id/int? -> none:
     sending_.do:
-      if packet is ConnectPacket: throw "INVALID_PACKET"
-      while true:
-        current_connection := connection_
-        // TODO(florian): only catch if we can reconnect.
-        exception := catch:
-          check_connected_
-          current_connection = connection_
-          connection_.send packet
-          if packet_id: pending_[packet_id] = packet
-          return
-        assert: exception != null
-        reconnect_ --reason=exception --old_connection=current_connection
+      is_sending_ = true
+      try:
+        if packet is ConnectPacket: throw "INVALID_PACKET"
+        while true:
+          current_connection := connection_
+          // TODO(florian): only catch if we can reconnect.
+          exception := catch:
+            check_connected_
+            current_connection = connection_
+            connection_.send packet
+            if packet_id: pending_[packet_id] = packet
+            if should_send_ping_:
+              should_send_ping_ = false
+              connection_.send PingReqPacket
+            return
+          assert: exception != null
+          reconnect_ --reason=exception --old_connection=current_connection
+      finally:
+        is_sending_ = false
 
   ack packet/Packet:
     if packet is PublishPacket:
