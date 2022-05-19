@@ -1,5 +1,6 @@
 - prepare persistency
 - unsubscribe
+- make sure the ticket queue is handling timeout.
 
 Tests:
 - test that ping packet can't be interleaved with other packets.
