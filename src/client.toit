@@ -96,6 +96,51 @@ class ClientOptions:
       --.keep_alive /Duration
       --.last_will /LastWill?:
 
+class ActivityChecker_:
+  connection_ /Connection_? := null
+  keep_alive_ /Duration
+
+  constructor --keep_alive/Duration:
+    keep_alive_ = keep_alive
+
+  connection= val: connection_ = val
+
+  /**
+  Checks for activity.
+
+  Returns a duration for when it wants to be called again.
+  Returns null if the connection is not alive anymore.
+  */
+  check -> Duration?:
+    if not connection_.is_alive: return null
+
+    // There should have been a 'connect' message.
+    assert: transport_.is_sending or transport_.last_sent_us
+
+    if not transport_.last_sent_us:
+      assert: transport_.is_sending
+      return keep_alive_
+
+    // TODO(florian): we should be more clever here:
+    // We should monitor when the transport starts writing, and when it gets a chunk through.
+    // Also, we should monitor that we actually get something from the server.
+    remaining_keep_alive_us := keep_alive_.in_us - (Time.monotonic_us - transport_.last_sent_us)
+    if remaining_keep_alive_us > 0:
+      remaining_keep_alive := Duration --us=remaining_keep_alive_us
+      return remaining_keep_alive
+    else if not transport_.is_sending:
+      // TODO(florian): we need to keep track of whether we have sent a ping.
+      connection_.send PingReqPacket
+      return keep_alive_ / 2
+    else:
+      // TODO(florian): we are currently sending.
+      // We should detect timeouts on the sending.
+      connection_.request_ping_after_current_message
+      return keep_alive_
+
+  transport_ -> ActivityMonitoringTransport_:
+    return connection_.transport_
+
 class Connection_:
   /**
   The connection is considered alive.
@@ -118,8 +163,10 @@ class Connection_:
 
   state_ / int := STATE_ALIVE_
 
-  keep_alive_ /Duration
+  is_sending_ /bool := false
   should_send_ping_ /bool := false
+
+  activity_checker_ /ActivityChecker_
   activity_task_ /Task_? := null
 
   transport_ / ActivityMonitoringTransport_
@@ -129,8 +176,9 @@ class Connection_:
   writing_ /monitor.Mutex ::= monitor.Mutex
 
   constructor transport/Transport --keep_alive/Duration:
-    keep_alive_ = keep_alive
+    activity_checker_ = ActivityChecker_ --keep_alive=keep_alive
     transport_ = ActivityMonitoringTransport_(transport)
+    activity_checker_.connection = this
 
   is_alive -> bool: return state_ == STATE_ALIVE_
   is_closing -> bool: return state_ == STATE_CLOSING_
@@ -145,11 +193,14 @@ class Connection_:
   */
   handle [block]:
     activity_task_ = task --background::
-      catch:
-        while is_alive:
-          sleep_duration := check_activity_
-          sleep sleep_duration
-          activity_task_ = null
+      try:
+        catch:
+          while is_alive:
+            sleep_duration := activity_checker_.check
+            if sleep_duration:
+              sleep sleep_duration
+      finally:
+        activity_task_ = null
 
     try:
       catch --unwind=(: not is_closing and not is_closed):
@@ -175,41 +226,19 @@ class Connection_:
     state_ = STATE_CLOSING_
     transport_.close
 
-  /**
-  Checks for activity.
+  request_ping_after_current_message:
+    assert: transport_
+    should_send_ping_ = true
 
-  Returns a duration for when it wants to be called again.
-  */
-  check_activity_ -> Duration:
-    // There should have been a 'connect' message.
-    assert: transport_.is_sending or transport_.last_sent_us
-
-    if not transport_.last_sent_us:
-      assert: transport_.is_sending
-      return keep_alive_
-
-    // TODO(florian): we should be more clever here:
-    // We should monitor when the transport starts writing, and when it gets a chunk through.
-    // Also, we should monitor that we actually get something from the server.
-    remaining_keep_alive_us := keep_alive_.in_us - (Time.monotonic_us - transport_.last_sent_us)
-    if remaining_keep_alive_us > 0:
-      remaining_keep_alive := Duration --us=remaining_keep_alive_us
-      return remaining_keep_alive
-    else if not transport_.is_sending:
-      // TODO(florian): we need to keep track of whether we have sent a ping.
-      send PingReqPacket
-      return keep_alive_ / 2
-    else:
-      // TODO(florian): we are currently sending.
-      // We should detect timeouts on the sending.
-      should_send_ping_ = true
-      return keep_alive_
+  is_sending -> bool:
+    return is_sending_
 
   send packet/Packet:
     // The writers should already be serialized by the session, but we sometimes send
     // a ping packet from the handler. This packet is so small that it is unlikely that it
     // would be interleaved, but to be sure we have a lock here.
     writing_.do:
+      is_sending_ = true
       try:
         exception := catch --unwind=(: not is_closing and not is_closed):
           writer := writer.Writer transport_
@@ -222,6 +251,7 @@ class Connection_:
           assert: is_closing or is_closed
           throw CLIENT_CLOSED_EXCEPTION
       finally: | is_exception exception |
+        is_sending_ = false
         if is_exception:
           close --reason=exception
 

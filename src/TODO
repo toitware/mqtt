@@ -15,3 +15,5 @@ Tests:
   * receive message with qos again, after reconnect.
 
 - break connection before connected_ barrier is set.
+
+- make sure we send acks.
