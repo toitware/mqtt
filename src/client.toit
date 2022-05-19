@@ -96,39 +96,23 @@ class ClientOptions:
       --.keep_alive /Duration
       --.last_will /LastWill?:
 
-/**
-A fair queue, that ensures that the tasks are executed in the order they arrive.
-*/
-monitor TicketQueue_:
-  ticket_number /int := 0
-  current_ticket /int := 0
-
-  do [block]:
-    my_ticket := ticket_number++
-    await: current_ticket == my_ticket
-    try:
-      return block.call
-    finally:
-      current_ticket++
-
-
-class Session_:
+class Connection_:
   /**
-  The session is considered alive.
+  The connection is considered alive.
   This could be because we haven't tried to establish a connection, but it
     could also be that we are happily running.
   */
   static STATE_ALIVE_ ::= 0
   /**
-  The session is in the process of disconnecting.
-  Once connected, if there is an error during receiving or sending, the session will
+  The connection is in the process of disconnecting.
+  Once connected, if there is an error during receiving or sending, the connection will
     switch to this state and call $Transport.close. This will cause the
     other side (receive or send) to shut down as well (if there is any).
   Once the handler has finished cleaning up, the state switches to $STATE_CLOSED_.
   */
   static STATE_CLOSING_ ::= 1
   /**
-  The session is shut down.
+  The connection is shut down.
   */
   static STATE_CLOSED_ ::= 2
 
@@ -155,19 +139,18 @@ class Session_:
   /**
   Connects to the server and receives incoming packets.
 
-  Only returns when the session is closed.
-  Returns null if the session is cleanly closed.
+  Only returns when the connection is closed.
+  Returns null if the connection is cleanly closed.
   Throws otherwise.
   */
   handle [block]:
-    /*
     activity_task_ = task --background::
       catch:
         while is_alive:
           sleep_duration := check_activity_
           sleep sleep_duration
           activity_task_ = null
-*/
+
     try:
       catch --unwind=(: not is_closing and not is_closed):
         reader := reader.BufferedReader transport_
@@ -247,7 +230,7 @@ class Session_:
 MQTT v3.1.1 Client with support for QoS 0 and 1.
 */
 class ClientAdvanced:
-  static DEFAULT_KEEP_ALIVE ::= Duration --s=5 // 60
+  static DEFAULT_KEEP_ALIVE ::= Duration --s=60
 
   /** The client has been created. Handle has not been called yet. */
   static STATE_CREATED_ ::= 0
@@ -273,8 +256,9 @@ class ClientAdvanced:
   transport_ /Transport
   logger_ /log.Logger?
 
-  session_ /Session_? := null
-  session_connected_ /Barrier_ := Barrier_
+  connection_ /Connection_? := null
+  connected_ /Barrier_ := Barrier_
+  reconnect_done_ /monitor.Latch? := null
 
   subscriptions_ /Map := {:}
 
@@ -284,7 +268,13 @@ class ClientAdvanced:
 
   closed_ /Barrier_ ::= Barrier_
 
-  send_queue_ /TicketQueue_ := TicketQueue_
+  /**
+  Serializes the senders.
+
+  Relies on the fact that Toit mutexes are fair and execute them in the order
+    in which they reached the mutex.
+  */
+  sending_ / monitor.Mutex := monitor.Mutex
 
   /**
   Constructs an MQTT client.
@@ -298,15 +288,17 @@ class ClientAdvanced:
 
   start --on_packet/Lambda -> none:
     if state_ != STATE_CREATED_: throw "INVALID_STATE"
-    assert: not session_
+    assert: not connection_
     connect_
     handle_ --on_packet=on_packet
 
   handle_ --on_packet/Lambda -> none:
     try:
       while true:
+        current_connection := connection_
+        // TODO(florian): only catch if we can reconnect.
         exception := catch:
-          session_.handle: | packet/Packet |
+          connection_.handle: | packet/Packet |
             if packet is PublishPacket:
               on_packet.call packet
             else if packet is ConnAckPacket:
@@ -317,29 +309,43 @@ class ClientAdvanced:
               // TODO(florian): implement persistence layer.
               pending_.remove id
                   --if_absent=: logger_.info "unmatched packet id: $id"
-        if exception and not (is_closed or is_closing):
-          // TODO(florian): implement exponential back-off or something similar.
-          reconnect_
+        if is_closed or is_closing: return
+        reconnect_ --reason=exception --old_connection=current_connection
     finally:
       tear_down_
-      session_ = null
+      connection_ = null
 
-  reconnect_:
-    // TODO(florian): add lock and ensure that either the receiver or the sender reconnects.
-    assert: not session_.is_alive
-    transport_.reconnect
-    session_connected_ = Barrier_
+  reconnect_ --reason --old_connection/Connection_ -> none:
+    print "reconnecting"
+    if is_closing or is_closed: return
+
+    assert: not connection_.is_alive
+    // TODO(florian): implement exponential back-off or something similar.
+    if connection_ != old_connection:
+      exception := reconnect_done_.get
+      if exception: throw exception
+
+    if not connected_.has_value:
+      // Make sure anyone listening on the barrier makes progress.
+      connected_.set reason
+    connected_ = Barrier_
+    connection_ = null
+    reconnect_done_ = monitor.Latch
+    try:
+      transport_.reconnect
+    finally: | is_exception exception |
+      reconnect_done_.set (is_exception ? exception : null)
     connect_
 
   connect_:
-    session_ = Session_ transport_ --keep_alive=options_.keep_alive
+    connection_ = Connection_ transport_ --keep_alive=options_.keep_alive
     state_ = STATE_CONNECTING1_
     packet := ConnectPacket options_.client_id
         --username=options_.username
         --password=options_.password
         --keep_alive=options_.keep_alive
         --last_will=options_.last_will
-    session_.send packet
+    connection_.send packet
     state_ = STATE_CONNECTING2_
 
   handle_connack_ packet/ConnAckPacket:
@@ -349,11 +355,11 @@ class ClientAdvanced:
 
     if packet.return_code != 0:
       state_ = STATE_CLOSED_
-      session_connected_.set "connection refused: $packet.return_code"
+      connected_.set "connection refused: $packet.return_code"
       return
 
     state_ = STATE_CONNECTED_
-    session_connected_.set null
+    connected_.set null
 
     // Before publishing messages, we need to subscribe to the topics we were subscribed to.
     // TODO(florian): also send/clear pending acks.
@@ -363,22 +369,27 @@ class ClientAdvanced:
       subscriptions_.do: | topic/string max_qos/int |
         topic_list.add (TopicFilter topic --max_qos=max_qos)
       subscribe_all topic_list
+      packet_id := next_packet_id_++
+      subscribe_packet := SubscribePacket topic_list --packet_id=packet_id
+      connection_.send packet
+      if packet_id: pending_[packet_id] = packet
+      send_ packet --packet_id=packet_id
 
   /**
-  Waits for the session to be connected and then calls the given $block.
+  Waits for the connection to be connected and then calls the given $block.
 
-  If the session could not connect throws.
-  If the session is closed throws.
+  If the connection could not connect throws.
+  If the connection is closed throws.
   */
   when_connected [block]:
     check_connected_
     block.call
 
   check_connected_:
-    exception := session_connected_.get
+    exception := connected_.get
     if exception: throw exception
     // Check that we are still connected and haven't been closed in the meantime.
-    if not session_.is_alive: throw CLIENT_CLOSED_EXCEPTION
+    if not connection_.is_alive: throw CLIENT_CLOSED_EXCEPTION
 
   /**
   Tears down the client.
@@ -386,8 +397,8 @@ class ClientAdvanced:
   tear_down_:
     state_ = STATE_CLOSED_
     closed_.set true
-    if not session_connected_.has_value:
-      session_connected_.set CLIENT_CLOSED_EXCEPTION
+    if not connected_.has_value:
+      connected_.set CLIENT_CLOSED_EXCEPTION
 
   /**
   Closes the client.
@@ -401,12 +412,12 @@ class ClientAdvanced:
 
     // Note that disconnect packets don't need a packet id (which is important as
     // the packet_id counter is used as marker that the client is closed).
-    if session_.is_alive:
-      catch --trace: session_.send DisconnectPacket
+    if connection_.is_alive:
+      catch --trace: connection_.send DisconnectPacket
 
-    // The session disconnect will stop the $Session_.handle. This in turn will invoke
+    // The connection disconnect will stop the $Connection_.handle. This in turn will invoke
     // the `tear_down` in $start method.
-    session_.close
+    connection_.close
 
     closed_.get
 
@@ -471,17 +482,25 @@ class ClientAdvanced:
     // Not implemented yet.
 
   send_ packet/Packet --packet_id/int? -> none:
-    send_queue_.do:
+    sending_.do:
       if packet is ConnectPacket: throw "INVALID_PACKET"
-      check_connected_
-      session_.send packet
-      if packet_id: pending_[packet_id] = packet
+      while true:
+        current_connection := connection_
+        // TODO(florian): only catch if we can reconnect.
+        exception := catch:
+          check_connected_
+          current_connection = connection_
+          connection_.send packet
+          if packet_id: pending_[packet_id] = packet
+          return
+        assert: exception != null
+        reconnect_ --reason=exception --old_connection=current_connection
 
   ack packet/Packet:
     if packet is PacketIDAck:
       id := (packet as PacketIDAck).packet_id
       ack := PubAckPacket id
-      session_.send ack
+      connection_.send ack
 
 
 class CallbackEntry_:
