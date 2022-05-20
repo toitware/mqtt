@@ -50,7 +50,7 @@ abstract class Packet:
     if kind == PubAckPacket.TYPE:
       return PubAckPacket.deserialize reader
     if kind == SubAckPacket.TYPE:
-      return SubAckPacket.deserialize reader
+      return SubAckPacket.deserialize reader size
     if kind == PingRespPacket.TYPE:
       return PingRespPacket.deserialize reader
 
@@ -229,17 +229,20 @@ class SubscribePacket extends Packet:
 class SubAckPacket extends Packet implements PacketIDAck:
   static TYPE ::= 9
 
-  packet_id/int
-  qos/int
+  /** The qos value for a failed subscription. */
+  static FAILED_SUBSCRIPTION_QOS ::= 0x80
+
+  packet_id /int
+  qos /List  // The list of qos matches the list of topics from the SubPacket.
 
   constructor .packet_id --.qos:
     super TYPE
 
-  constructor.deserialize reader/reader.BufferedReader:
+  constructor.deserialize reader/reader.BufferedReader size/int:
     data := reader.read_bytes 2
+    size -= 2
     packet_id = binary.BIG_ENDIAN.uint16 data 0
-    qos = reader.read_byte
-    if qos == 127: throw "QoS negotiation failed"
+    qos = List size: reader.read_byte
     super TYPE
 
   variable_header -> ByteArray:
