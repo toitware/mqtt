@@ -708,7 +708,7 @@ class Client:
 
     if packet is SubAckPacket:
       suback := packet as SubAckPacket
-      if (suback.qos == 0x80):
+      if (suback.qos.any: it == 0x80):
         logger_.error "At least one subscription failed"
 
     // Ignore all other packets.
