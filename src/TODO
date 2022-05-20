@@ -17,3 +17,18 @@ Tests:
 - break connection before connected_ barrier is set.
 
 - make sure we send acks.
+
+- send some packets that are queued. Then `client.close`. The disconnect message
+  should preempt the queued packets.
+
+- send some packets with qos=1.
+  Don't send acks back.
+  Close (disconnect).
+  The packets are in unconfirmed state.
+
+- throw when trying to send a disconnect message.
+  The client should not reconnect. I think.
+  If there are still messages queued.
+
+- let the handler throw.
+  Should it be caught, or brings it down the whole client?

@@ -11,12 +11,14 @@ main:
   // socket := net.open.tcp_connect "127.0.0.1" 1883
   // transport := mqtt.TcpTransport socket
 
-  client := mqtt.Client
-    --client_id = "toit-subscribe"
+  options := mqtt.ClientOptions --client_id="toit-subscribe"
+
+  router := mqtt.Router
+    --client_options = options
     --transport = transport
 
-  client.start --detached
+  router.start --detached
   print "connected to broker"
 
-  client.subscribe TOPIC --max_qos=1:: | topic payload |
+  router.subscribe TOPIC --max_qos=1:: | topic payload |
     print "$topic: $payload.to_string_non_throwing"

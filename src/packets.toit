@@ -5,28 +5,12 @@
 import bytes
 import binary
 import reader
-import .client show Client  // For toitdoc reference.
 
+import .last_will
 import .topic_filter
 
 interface PacketIDAck:
   packet_id -> int
-
-class LastWill:
-  retain/bool
-  qos/int
-  topic/string
-  payload/ByteArray
-
-  /**
-  Constructs the configuration of a last-will message.
-
-  The parameters $topic, $payload, $qos and $retain have the same
-    meaning as for $Client.publish, and are used when the last-will message
-    is eventually sent.
-  */
-  constructor .topic .payload --.qos --.retain=false:
-    if not 0 <= qos <= 2: throw "INVALID_QOS"
 
 abstract class Packet:
   type/int
