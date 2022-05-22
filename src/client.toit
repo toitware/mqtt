@@ -53,36 +53,143 @@ monitor Barrier_:
   has_value -> bool:
     return has_value_
 
-class ActivityMonitoringTransport_ implements Transport:
-  wrapped_transport_ / Transport
-  is_writing /bool := false
-  writing_since /int? := null
-  last_sent_us /int? := null
+/**
+A connection to the broker.
 
-  constructor .wrapped_transport_:
+Primarily ensures that exceptions are handled correctly.
+The first side (reading or writing) that detects an issue with the transport disconnects the transport.
+  It throws the original exception. The other side simply throws a "CLIENT_CLOSED_EXCEPTION".
+*/
+class Connection_:
+  /**
+  The connection is considered alive.
+  This could be because we haven't tried to establish a connection, but it
+    could also be that we are happily running.
+  */
+  static STATE_ALIVE_ ::= 0
+  /**
+  The connection is closed or in the process of closing.
+  Once connected, if there is an error during receiving or sending, the connection will
+    switch to this state and call $Transport.close. This will cause the
+    other side (receive or send) to shut down as well (if there is any).
+  */
+  static STATE_CLOSED_ ::= 1
 
-  write bytes/ByteArray -> int:
+  state_ / int := STATE_ALIVE_
+
+  transport_ / Transport
+  reader_ /reader.BufferedReader
+  writer_ /writer.Writer
+  writing_ /monitor.Mutex ::= monitor.Mutex
+
+  closing_reason_ /any := null
+
+  constructor .transport_:
+    reader_ = reader.BufferedReader transport_
+    writer_ = writer.Writer transport_
+
+  is_alive -> bool: return state_ == STATE_ALIVE_
+  is_closed -> bool: return state_ == STATE_CLOSED_
+
+  /**
+  Receives an incoming packet.
+  */
+  read -> Packet?:
+    if is_closed: throw CLIENT_CLOSED_EXCEPTION
     try:
-      is_writing = true
-      writing_since = Time.monotonic_us
-      result := wrapped_transport_.write bytes
-      last_sent_us = Time.monotonic_us
-      return result
-    finally:
-      is_writing = false
+      catch --unwind=(: not is_closed):
+        return Packet.deserialize reader_
 
-  read -> ByteArray?:
-    return wrapped_transport_.read
+      if closing_reason_: throw closing_reason_
+      return null
+    finally: | is_exception exception |
+      if is_exception:
+        close --reason=exception
+        state_ = STATE_CLOSED_
+
+  close --reason=null:
+    if is_closed: return
+    assert: closing_reason_ == null
+    closing_reason_ = reason
+    // By setting the state to closied we quell any error messages from disconnecting the transport.
+    state_ = STATE_CLOSED_
+    transport_.close
+
+  write packet/Packet:
+    // The client already serializes most sends. However, some messages are written without
+    // taking the client's lock. For example, 'ack' messages, the 'disconnect' message, or pings
+    // are directly written to the connection (jumping the queue).
+    writing_.do:
+      if is_closed: throw CLIENT_CLOSED_EXCEPTION
+      try:
+        exception := catch --unwind=(: not is_closed):
+          writer_.write packet.serialize
+        if exception:
+          assert: is_closed
+          throw CLIENT_CLOSED_EXCEPTION
+      finally: | is_exception exception |
+        if is_exception:
+          close --reason=exception
+
+/**
+Establishes and maintains a connection to the broker.
+*/
+interface ConnectionManager:
+  // Must return the result of `receive_connect_ack`.
+  reconnect transport/ActivityMonitoringTransport [--send_connect] [--receive_connect_ack] -> any
+  should_try_reconnect transport/ActivityMonitoringTransport -> bool
+  close -> none
+
+class DefaultConnectionManager implements ConnectionManager:
+  static SEND_CONNECT_TIME_OUT_SECONDS_ /int ::= 5
+  static RECEIVE_CONNECT_TIME_OUT_SECONDS_ /int ::= 5
+  static ATTEMPT_DELAYS_MS_ /List ::= [1_000, 5_000, 15_000]
+
+  is_closed /bool := false
+
+  reconnect transport/ActivityMonitoringTransport [--send_connect] [--receive_connect_ack] -> any:
+    failed_counter := 0
+    while not is_closed:
+      did_connect := false
+
+      should_abandon := :
+        // If we did connect, we managed to send and receive packets.
+        // As such, we consider the network as "working" and will retry.
+        // If we didn't manage to connect, we will only retry if we haven't exhausted
+        //   the retry-attempts.
+        is_closed or (not did_connect and failed_counter >= ATTEMPT_DELAYS_MS_.size)
+
+      catch --unwind=should_abandon:
+        with_timeout --ms=(SEND_CONNECT_TIME_OUT_SECONDS_ * 1000):
+          send_connect.call
+        ack := null
+        with_timeout --ms=(RECEIVE_CONNECT_TIME_OUT_SECONDS_ * 1000):
+          ack = receive_connect_ack.call
+
+        did_connect = true
+
+        // If the client is not authorized to connect, then the ack packet will contain an
+        // error code. The caller of this method will then call the $close method, so that it
+        // won't try again (which would be pointless).
+        // Also, if there is an exception independent of the connection, then the client also
+        // closes the connection and returns.
+        return ack
+
+      if is_closed: return null
+
+      failed_counter++
+      assert: failed_counter <= ATTEMPT_DELAYS_MS_.size
+      // TODO(florian): should we split the sleep into smaller portions so that we can check if
+      // the is_closed flag is set?
+      sleep --ms=ATTEMPT_DELAYS_MS_[failed_counter - 1]
+
+    return null
+
+  should_try_reconnect transport/ActivityMonitoringTransport -> bool:
+    return transport.supports_reconnect
 
   close -> none:
-    wrapped_transport_.close
-
-  supports_reconnect -> bool:
-    return wrapped_transport_.supports_reconnect
-
-  reconnect -> none:
-    wrapped_transport_.reconnect
-
+    is_closed = true
 
 class ActivityChecker_:
   client_ /Client
@@ -109,16 +216,16 @@ class ActivityChecker_:
       reset
 
     // There should have been a 'connect' message.
-    assert: transport_.is_sending or transport_.last_sent_us
+    assert: transport_.is_sending or transport_.last_write_us
 
-    if not transport_.last_sent_us:
+    if not transport_.last_write_us:
       assert: transport_.is_sending
       return keep_alive_
 
     // TODO(florian): we should be more clever here:
     // We should monitor when the transport starts writing, and when it gets a chunk through.
     // Also, we should monitor that we actually get something from the server.
-    remaining_keep_alive_us := keep_alive_.in_us - (Time.monotonic_us - transport_.last_sent_us)
+    remaining_keep_alive_us := keep_alive_.in_us - (Time.monotonic_us - transport_.last_write_us)
     if remaining_keep_alive_us > 0:
       remaining_keep_alive := Duration --us=remaining_keep_alive_us
       return remaining_keep_alive
@@ -132,106 +239,14 @@ class ActivityChecker_:
       client_.request_ping_after_current_packet
       return keep_alive_
 
-  transport_ -> ActivityMonitoringTransport_:
+  transport_ -> ActivityMonitoringTransport:
     return client_.transport_
 
   run:
     while not client_.is_closed and not client_.is_closing:
-      duration := check
-      sleep duration
-
-class Connection_:
-  /**
-  The connection is considered alive.
-  This could be because we haven't tried to establish a connection, but it
-    could also be that we are happily running.
-  */
-  static STATE_ALIVE_ ::= 0
-  /**
-  The connection is in the process of disconnecting.
-  Once connected, if there is an error during receiving or sending, the connection will
-    switch to this state and call $Transport.close. This will cause the
-    other side (receive or send) to shut down as well (if there is any).
-  Once the handler has finished cleaning up, the state switches to $STATE_CLOSED_.
-  */
-  static STATE_CLOSING_ ::= 1
-  /**
-  The connection is shut down.
-  */
-  static STATE_CLOSED_ ::= 2
-
-  state_ / int := STATE_ALIVE_
-
-  should_send_ping_ /bool := false
-
-  transport_ / Transport
-
-  closing_reason_ /any := null
-
-  writing_ /monitor.Mutex ::= monitor.Mutex
-
-  constructor .transport_:
-
-  is_alive -> bool: return state_ == STATE_ALIVE_
-  is_closing -> bool: return state_ == STATE_CLOSING_
-  is_closed -> bool: return state_ == STATE_CLOSED_
-
-  /**
-  Connects to the server and receives incoming packets.
-
-  Only returns when the connection is closed.
-  Returns null if the connection is cleanly closed.
-  Throws otherwise.
-  */
-  handle [block]:
-    try:
-      catch --unwind=(: not is_closing and not is_closed):
-        reader := reader.BufferedReader transport_
-        while not is_closing:
-          packet := Packet.deserialize reader
-          block.call packet
-    finally: | is_exception exception |
-      close --reason=(is_exception ? exception : null)
-      state_ = STATE_CLOSED_
-
-  close --reason=null:
-    if is_closing or is_closed: return
-    assert: closing_reason_ == null
-    closing_reason_ = reason
-    // By setting the state to closing we quell any error messages from disconnecting the transport.
-    state_ = STATE_CLOSING_
-    transport_.close
-
-  request_ping_after_current_message:
-    assert: transport_
-    should_send_ping_ = true
-
-  send packet/Packet:
-    // The client already serializes most sends. However, some messages are written without
-    // taking the client's lock. For example, 'ack' messages, the 'disconnect' message, or pings
-    // are directly written to the connection.
-    writing_.do:
-      try:
-        exception := catch --unwind=(: not is_closing and not is_closed):
-          writer := writer.Writer transport_
-          writer.write packet.serialize
-          // Let pings jump the queue.
-          if should_send_ping_:
-            should_send_ping_ = false
-            transport_.write (PingReqPacket).serialize
-        if exception:
-          assert: is_closing or is_closed
-          throw CLIENT_CLOSED_EXCEPTION
-      finally: | is_exception exception |
-        if is_exception:
-          close --reason=exception
-
-/**
-A strategy to handle reconnects.
-
-Keeps track of reconnection attempts.
-*/
-class ReconnectionStrategy_:
+      catch:
+        duration := check
+        sleep duration
 
 
 /**
@@ -252,8 +267,6 @@ class Client:
   static STATE_CONNECTING2_ ::= 2
   /** The client is connected. */
   static STATE_CONNECTED_ ::= 3
-  /** The client is disconnected. */
-  static STATE_DISCONNECTED_ ::= 4
   /**
   The client is disconnected and in the process of shutting down.
   This only happens once the current message has been handled. That is, once
@@ -266,13 +279,12 @@ class Client:
   state_ /int := STATE_CREATED_
 
   options_ /ClientOptions
-  transport_ /ActivityMonitoringTransport_
+  transport_ /ActivityMonitoringTransport
   logger_ /log.Logger?
 
   connection_ /Connection_? := null
   connected_ /Barrier_ := Barrier_
   reconnect_done_ /monitor.Latch? := null
-  reconnection_strategy_ /ReconnectionStrategy_ := ReconnectionStrategy_
 
   subscriptions_ /Map := {:}
 
@@ -294,16 +306,21 @@ class Client:
   is_sending_ /bool := false
   should_send_ping_ /bool := false
 
+  connection_manager_ /ConnectionManager
   /**
   Constructs an MQTT client.
 
   The client starts disconnected. Call $start to initiate the connection.
   */
-  constructor --options/ClientOptions --transport/Transport --logger/log.Logger?:
+  constructor
+      --options/ClientOptions
+      --transport/Transport
+      --logger/log.Logger?
+      --connection_manager /ConnectionManager = DefaultConnectionManager:
     options_ = options
-    transport_ = ActivityMonitoringTransport_(transport)
+    transport_ = ActivityMonitoringTransport.private_(transport)
     logger_ = logger
-
+    connection_manager_ = connection_manager
 
   start --on_packet/Lambda -> none:
     if state_ != STATE_CREATED_: throw "INVALID_STATE"
@@ -320,21 +337,42 @@ class Client:
         finally:
           activity_task_ = null
 
-      with_reconnect_ --no-wait_for_connected:
-        connection_.handle: | packet/Packet |
+      with_reconnect_:
+        while packet := connection_.read:
           if packet is PublishPacket:
-            on_packet.call packet
+            try:
+              on_packet.call packet
+            finally: | is_exception _ |
+              // Exceptions in the callback bring down the Mqtt client.
+              // This is harsh, but we don't want to lose messages.
+              if is_exception: connection_manager_.close
           else if packet is ConnAckPacket:
-            handle_connack_ (packet as ConnAckPacket)
+            if logger_: logger_.info "spurious conn-ack packet"
           else if packet is PacketIDAck:
             ack := packet as PacketIDAck
             id := ack.packet_id
             // TODO(florian): implement persistence layer.
             pending_.remove id
                 --if_absent=: logger_.info "unmatched packet id: $id"
+          else:
+            if logger_: logger_.info "unexpected packet of type $packet.type"
     finally:
       tear_down_
       connection_ = null
+
+  with_reconnect_ [block]:
+    while true:
+      current_connection := connection_
+      // If the connection is still alive, or if the manager doesn't want us to reconnect, let the
+      // exception go through.
+      exception := catch --unwind=(: connection_.is_alive or not connection_manager_.should_try_reconnect transport_):
+        if wait_for_connected: check_connected_
+        current_connection = connection_
+        block.call
+        return
+      assert: exception != null
+      if is_closing or is_closed: return
+      reconnect_ --reason=exception --old_connection=current_connection
 
   reconnect_ --reason --old_connection/Connection_ -> none:
     assert: not connection_.is_alive
@@ -378,9 +416,7 @@ class Client:
         --password=options_.password
         --keep_alive=options_.keep_alive
         --last_will=options_.last_will
-    reconnection_strategy_.inform_connect_send
     connection_.send packet
-    reconnection_strategy_.inform_connect_sent
     state_ = STATE_CONNECTING2_
 
   handle_connack_ packet/ConnAckPacket:
@@ -390,11 +426,9 @@ class Client:
 
     if packet.return_code != 0:
       state_ = STATE_CLOSED_
-      reconnection_strategy_.inform_refused
       connected_.set "connection refused: $packet.return_code"
       return
 
-    reconnection_strategy_.inform_connected
     state_ = STATE_CONNECTED_
     connected_.set null
 

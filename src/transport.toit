@@ -41,3 +41,52 @@ interface Transport implements reader.Reader:
   Reconnects the transport.
   */
   reconnect -> none
+
+/**
+A transport that monitors activity on a wrapped transport.
+
+The Mqtt library automatically wraps transports in actvity-monitoring
+  transports. Users of the library should never need to instantiate this
+  class themselves.
+*/
+class ActivityMonitoringTransport implements Transport:
+  wrapped_transport_ / Transport
+
+  is_writing /bool := false
+  writing_since_us /int? := null
+  last_write_us /int? := null
+
+  is_reading /bool := false
+  reading_since_us /int? := null
+  last_read_us /int? := null
+
+  constructor.private_ .wrapped_transport_:
+
+  write bytes/ByteArray -> int:
+    try:
+      is_writing = true
+      writing_since_us = Time.monotonic_us
+      result := wrapped_transport_.write bytes
+      last_write_us = Time.monotonic_us
+      return result
+    finally:
+      is_writing = false
+
+  read -> ByteArray?:
+    try:
+      is_reading = true
+      reading_since_us = Time.monotonic_us
+      result := wrapped_transport_.read
+      last_read_us = Time.monotonic_us
+      return result
+    finally:
+      is_reading = false
+
+  close -> none:
+    wrapped_transport_.close
+
+  supports_reconnect -> bool:
+    return wrapped_transport_.supports_reconnect
+
+  reconnect -> none:
+    wrapped_transport_.reconnect
