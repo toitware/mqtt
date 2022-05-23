@@ -17,43 +17,6 @@ import .transport
 CLIENT_CLOSED_EXCEPTION ::= "CLIENT_CLOSED"
 
 /**
-A barrier that allows multiple tasks to synchronize.
-Also has a value that can be used to communicate.
-
-Similar to $monitor.Latch but explicitly allows multiple tasks to $get.
-*/
-monitor Barrier_:
-  has_value_ := false
-  value_ := null
-
-  /**
-  Receives the value.
-
-  Blocks until the value is available.
-  */
-  get:
-    await: has_value_
-    return value_
-
-  /**
-  Sets the $value of the barrier.
-
-  Calling this method unblocks any task that is blocked in the $get method of
-    the same instance, sending the $value to it.
-  Future calls to $get return immediately and use this $value.
-  Must be called at most once.
-  */
-  set value:
-    value_ = value
-    has_value_ = true
-
-  /**
-  Whether the barrier has a value.
-  */
-  has_value -> bool:
-    return has_value_
-
-/**
 A class that ensures that the connection to the broker is kept alive.
 
 When necessary sends ping packets to the broker.
@@ -326,8 +289,6 @@ class Client:
   next_packet_id_/int? := 1
   pending_ / Map ::= {:}  // int -> Packet
 
-  closed_ /Barrier_ ::= Barrier_
-
   /**
   A mutex to queue the senders.
 
@@ -337,10 +298,12 @@ class Client:
   sending_ /monitor.Mutex := monitor.Mutex
 
   reconnection_strategy_ /ReconnectionStrategy
+
   /**
   Constructs an MQTT client.
 
-  The client starts disconnected. Call $handle to initiate the connection.
+  The client starts disconnected. Call $connect, followed by $handle to initiate
+    the connection.
   */
   constructor
       --options/ClientOptions
@@ -383,16 +346,143 @@ class Client:
               --if_absent=: logger_.info "unmatched packet id: $id"
         else:
           if logger_: logger_.info "unexpected packet of type $packet.type"
-    finally: | is_exception exception |
-      // Exceptions in the callback bring down the Mqtt client.
-      // This is harsh, but we don't want to lose messages.
-      if is_exception:
-        reconnection_strategy_.close
+    finally:
+      reconnection_strategy_.close
       tear_down_
-      connection_ = null
+
+  /**
+  Closes the client.
+
+  If $disconnect is true and the connection is still alive send a disconnect packet,
+    informing the broker of the disconnection.
+  */
+  close --disconnect/bool=true:
+    if is_closed: return
+
+    if state_ == STATE_CREATED_ or state_ == STATE_CONNECTING_ or state_ == STATE_CONNECTED_:
+      tear_down_
+      return
+
+    assert: state_ == STATE_HANDLING_
+
+    state_ = STATE_CLOSING_
+
+    // Note that disconnect packets don't need a packet id (which is important as
+    // the packet_id counter is used as marker that the client is closed).
+    if connection_.is_alive:
+      if disconnect:
+        catch:
+          with_timeout --ms=SEND_DISCONNECT_TIME_OUT_SECONDS_ * 1000:
+            connection_.write DisconnectPacket
+
+      // The connection disconnect will stop any receiving in the $handle method.
+      // This, in turn, will invoke the `tear_down` in $handle method.
+      connection_.close
+
+  /**
+  Whether the client is closing or closed.
+
+  After a call to `close` (internal or external), the client starts to close.
+  It is only considered fully closed when $handle returns.
+  */
+  is_closed -> bool:
+    return state_ == STATE_CLOSING_ or state_ == STATE_CLOSED_
+
+  /**
+  Publishes an MQTT message on $topic.
+
+  The $qos parameter must be either:
+  - 0: at most once, aka "fire and forget". In this configuration the message is sent, but the delivery
+        is not guaranteed.
+  - 1: at least once. The MQTT client ensures that the message is received by the MQTT broker.
+
+  QOS = 2 (exactly once) is not implemented by this client.
+
+  The $retain parameter lets the MQTT broker know whether it should retain this message. A new (later)
+    subscription to this $topic would receive the retained message, instead of needing to wait for
+    a new message on that topic.
+
+  Not all MQTT brokers support $retain.
+  */
+  publish topic/string payload/ByteArray --qos=1 --retain=false -> none:
+    if is_closed: throw CLIENT_CLOSED_EXCEPTION
+    // The client is only active once $start has been called.
+    if state_ != STATE_HANDLING_: throw "INVALID_STATE"
+    if qos != 0 and qos != 1: throw "INVALID_ARGUMENT"
+
+    packet_id := qos > 0 ? next_packet_id_++ : null
+
+    packet := PublishPacket
+        topic
+        payload
+        --qos=qos
+        --retain=retain
+        --packet_id=packet_id
+
+    send_ packet --packet_id=(qos > 0 ? packet_id : null)
+
+  /**
+  Subscribes to the given $filter with a max qos of $max_qos.
+  */
+  subscribe filter/string --max_qos/int=1 -> none:
+    subscribe_all [ TopicFilter filter --max_qos=max_qos ]
+
+  /**
+  Subscribes to the given list $topic_filters of type $TopicFilter.
+  */
+  subscribe_all topic_filters/List -> none:
+    if is_closed: throw CLIENT_CLOSED_EXCEPTION
+    // The client is only active once $start has been called.
+    if state_ != STATE_HANDLING_: throw "INVALID_STATE"
+
+    if topic_filters.is_empty: return
+
+    topic_filters.do: | topic_filter/TopicFilter |
+      subscriptions_[topic_filter.filter] = topic_filter.max_qos
+
+    packet_id := next_packet_id_++
+    packet := SubscribePacket topic_filters --packet_id=packet_id
+    send_ packet --packet_id=packet_id
+
+  /** Unsubscribes from a single topic $filter. */
+  unsubscribe filter/string -> none:
+    unsubscribe_all [filter]
+
+  /** Unsubscribes from the list of topic $filters (of type $string). */
+  unsubscribe_all filters/List -> none:
+    if is_closed: throw CLIENT_CLOSED_EXCEPTION
+    // The client is only active once $start has been called.
+    if state_ != STATE_HANDLING_: throw "INVALID_STATE"
+
+    if filters.is_empty: return
+
+    packet_id := next_packet_id_++
+    packet := UnsubscribePacket filters --packet_id=packet_id
+    send_ packet --packet_id=packet_id
+
+  /**
+  Acknowledges the hand-over of the packet.
+
+  If the packet has qos=1, sends an ack packet to the broker.
+  */
+  ack packet/Packet:
+    // Can't ack if we don't have a connection anymore.
+    if is_closed: return
+    if packet is PublishPacket:
+      id := (packet as PublishPacket).packet_id
+      if id:
+        ack := PubAckPacket id
+        do_connected_: connection_.write ack
+
+  send_ packet/Packet --packet_id/int? -> none:
+    sending_.do:
+      if is_closed: throw CLIENT_CLOSED_EXCEPTION
+      if packet is ConnectPacket: throw "INVALID_PACKET"
+      do_connected_: connection_.write packet
+      if packet_id: pending_[packet_id] = packet
 
   do_connected_ [block]:
-    if is_closing or is_closed: throw CLIENT_CLOSED_EXCEPTION
+    if is_closed: throw CLIENT_CLOSED_EXCEPTION
     while true:
       // If the connection is still alive, or if the manager doesn't want us to reconnect, let the
       // exception go through.
@@ -403,16 +493,16 @@ class Client:
         block.call
         return
       assert: exception != null
-      if is_closing or is_closed: throw CLIENT_CLOSED_EXCEPTION
+      if is_closed: throw CLIENT_CLOSED_EXCEPTION
       reconnect_ --reason=exception
-      if is_closing or is_closed: throw CLIENT_CLOSED_EXCEPTION
+      if is_closed: throw CLIENT_CLOSED_EXCEPTION
 
   reconnect_ --reason -> none:
     assert: not connection_ or not connection_.is_alive
     old_connection := connection_
 
     connecting_.do:
-      // Check that nobody else created the connection in the meantime.
+      // Check that nobody else reconnected while we took the lock.
       if connection_ != old_connection: return
       try:
         connection_ = Connection_ transport_ --keep_alive=options_.keep_alive
@@ -473,133 +563,4 @@ class Client:
       if connection_:
         connection_.close
         connection_ = null
-      closed_.set true
 
-  /**
-  Closes the client.
-
-  If $disconnect is true and the connection is still alive send a disconnect packet,
-    informing the broker of the disconnection.
-  */
-  close --disconnect/bool=true:
-    if is_closing or is_closed: return
-
-    if state_ == STATE_CREATED_ or state_ == STATE_CONNECTING_ or state_ == STATE_CONNECTED_:
-      tear_down_
-      return
-
-    assert: state_ == STATE_HANDLING_
-
-    state_ = STATE_CLOSING_
-
-    // Note that disconnect packets don't need a packet id (which is important as
-    // the packet_id counter is used as marker that the client is closed).
-    if connection_.is_alive:
-      if disconnect:
-        catch:
-          with_timeout --ms=SEND_DISCONNECT_TIME_OUT_SECONDS_ * 1000:
-            connection_.write DisconnectPacket
-
-      // The connection disconnect will stop any receiving in the $handle method.
-      // This, in turn, will invoke the `tear_down` in $handle method.
-      connection_.close
-
-  /**
-  Whether the client is closing.
-
-  After a call to `close` (internal or external), the client switches to a closing state.
-  It is only considered fully closed when $handle returns.
-  */
-  is_closing -> bool:
-    return state_ == STATE_CLOSING_
-
-  /** Whether the client is closed. */
-  is_closed -> bool:
-    return state_ == STATE_CLOSED_
-
-  /**
-  Publishes an MQTT message on $topic.
-
-  The $qos parameter must be either:
-  - 0: at most once, aka "fire and forget". In this configuration the message is sent, but the delivery
-        is not guaranteed.
-  - 1: at least once. The MQTT client ensures that the message is received by the MQTT broker.
-
-  QOS = 2 (exactly once) is not implemented by this client.
-
-  The $retain parameter lets the MQTT broker know whether it should retain this message. A new (later)
-    subscription to this $topic would receive the retained message, instead of needing to wait for
-    a new message on that topic.
-
-  Not all MQTT brokers support $retain.
-  */
-  publish topic/string payload/ByteArray --qos=1 --retain=false -> none:
-    // The client is only active once $start has been called.
-    if state_ == STATE_CREATED_: throw "INVALID_STATE"
-    if is_closing or is_closed: throw CLIENT_CLOSED_EXCEPTION
-    if qos != 0 and qos != 1: throw "INVALID_ARGUMENT"
-
-    packet_id := qos > 0 ? next_packet_id_++ : null
-
-    packet := PublishPacket
-        topic
-        payload
-        --qos=qos
-        --retain=retain
-        --packet_id=packet_id
-
-    send_ packet --packet_id=(qos > 0 ? packet_id : null)
-
-  /**
-  Subscribes to the given $filter with a max qos of $max_qos.
-  */
-  subscribe filter/string --max_qos/int=1 -> none:
-    subscribe_all [ TopicFilter filter --max_qos=max_qos ]
-
-  /**
-  Subscribes to the given list $topic_filters of type $TopicFilter.
-  */
-  subscribe_all topic_filters/List -> none:
-    if is_closed: throw CLIENT_CLOSED_EXCEPTION
-    if topic_filters.is_empty: return
-
-    topic_filters.do: | topic_filter/TopicFilter |
-      subscriptions_[topic_filter.filter] = topic_filter.max_qos
-
-    packet_id := next_packet_id_++
-    packet := SubscribePacket topic_filters --packet_id=packet_id
-    send_ packet --packet_id=packet_id
-
-  /** Unsubscribes from a single topic $filter. */
-  unsubscribe filter/string -> none:
-    unsubscribe_all [filter]
-
-  /** Unsubscribes from the list of topic $filters (of type $string). */
-  unsubscribe_all filters/List -> none:
-    if is_closed: throw CLIENT_CLOSED_EXCEPTION
-    if filters.is_empty: return
-
-    packet_id := next_packet_id_++
-    packet := UnsubscribePacket filters --packet_id=packet_id
-    send_ packet --packet_id=packet_id
-
-  send_ packet/Packet --packet_id/int? -> none:
-    sending_.do:
-      if is_closing or is_closed: throw CLIENT_CLOSED_EXCEPTION
-      if packet is ConnectPacket: throw "INVALID_PACKET"
-      do_connected_: connection_.write packet
-      if packet_id: pending_[packet_id] = packet
-
-  /**
-  Acknowledges the hand-over of the packet.
-
-  If the packet has qos=1, sends an ack packet to the broker.
-  */
-  ack packet/Packet:
-    // Can't ack if we don't have a connection anymore.
-    if is_closing or is_closed: return
-    if packet is PublishPacket:
-      id := (packet as PublishPacket).packet_id
-      if id:
-        ack := PubAckPacket id
-        do_connected_: connection_.write ack
