@@ -51,6 +51,8 @@ abstract class Packet:
       return PubAckPacket.deserialize reader
     if kind == SubAckPacket.TYPE:
       return SubAckPacket.deserialize reader size
+    if kind == UnsubAckPacket.TYPE:
+      return UnsubAckPacket.deserialize reader
     if kind == PingRespPacket.TYPE:
       return PingRespPacket.deserialize reader
 
@@ -243,6 +245,46 @@ class SubAckPacket extends Packet implements PacketIDAck:
     size -= 2
     packet_id = binary.BIG_ENDIAN.uint16 data 0
     qos = List size: reader.read_byte
+    super TYPE
+
+  variable_header -> ByteArray:
+    data := ByteArray 2
+    binary.BIG_ENDIAN.put_uint16 data 0 packet_id
+    return data
+
+  payload -> ByteArray: return #[]
+
+class UnsubscribePacket extends Packet:
+  static TYPE ::= 10
+
+  topic_filters/List/*<string>*/
+  packet_id/int
+
+  constructor .topic_filters --.packet_id:
+    super TYPE --flags=0b0010
+
+  variable_header -> ByteArray:
+    data := ByteArray 2
+    binary.BIG_ENDIAN.put_uint16 data 0 packet_id
+    return data
+
+  payload -> ByteArray:
+    buffer := bytes.Buffer
+    topic_filters.do: | topic_filter/string |
+      Packet.encode_string buffer topic_filter
+    return buffer.bytes
+
+class UnsubAckPacket extends Packet implements PacketIDAck:
+  static TYPE ::= 11
+
+  packet_id /int
+
+  constructor .packet_id:
+    super TYPE
+
+  constructor.deserialize reader/reader.BufferedReader:
+    data := reader.read_bytes 2
+    packet_id = binary.BIG_ENDIAN.uint16 data 0
     super TYPE
 
   variable_header -> ByteArray:
