@@ -238,6 +238,27 @@ class DefaultReconnectionStrategy implements ReconnectionStrategy:
   close -> none:
     is_closed = true
 
+class Session_:
+  subscriptions /Map ::= {:}
+  next_packet_id_/int? := 1
+  pending_ / Map ::= {:}  // int -> Packet.
+
+  logger_ /log.Logger
+
+  constructor .logger_:
+
+  set_pending_ack packet/Packet --packet_id/int:
+    pending_[packet_id] = packet
+
+  handle_ack id/int [--if_absent]:
+    pending_.remove id --if_absent=if_absent
+
+  next_packet_id -> int:
+    return next_packet_id_++
+
+  has_subscriptions -> bool:
+    return not subscriptions.is_empty
+
 /**
 An MQTT client.
 
@@ -281,13 +302,10 @@ class Client:
   transport_ /ActivityMonitoringTransport
   logger_ /log.Logger?
 
+  session_ /Session_? := null
+
   connection_ /Connection_? := null
   connecting_ /monitor.Mutex := monitor.Mutex
-
-  // TODO(florian): move this into `Session_`.
-  subscriptions_ /Map := {:}
-  next_packet_id_/int? := 1
-  pending_ / Map ::= {:}  // int -> Packet
 
   /**
   A mutex to queue the senders.
@@ -318,6 +336,8 @@ class Client:
   connect -> none:
     if state_ != STATE_CREATED_: throw "INVALID_STATE"
     assert: not connection_
+    session_ = Session_ logger_
+
     state_ = STATE_CONNECTING_
     reconnect_ --reason=null
     state_ = STATE_CONNECTED_
@@ -342,7 +362,7 @@ class Client:
           ack := packet as PacketIDAck
           id := ack.packet_id
           // TODO(florian): implement persistence layer.
-          pending_.remove id
+          session_.handle_ack id
               --if_absent=: logger_.info "unmatched packet id: $id"
         else:
           if logger_: logger_.info "unexpected packet of type $packet.type"
@@ -410,7 +430,7 @@ class Client:
     if state_ != STATE_HANDLING_: throw "INVALID_STATE"
     if qos != 0 and qos != 1: throw "INVALID_ARGUMENT"
 
-    packet_id := qos > 0 ? next_packet_id_++ : null
+    packet_id := qos > 0 ? session_.next_packet_id : null
 
     packet := PublishPacket
         topic
@@ -438,9 +458,9 @@ class Client:
     if topic_filters.is_empty: return
 
     topic_filters.do: | topic_filter/TopicFilter |
-      subscriptions_[topic_filter.filter] = topic_filter.max_qos
+      session_.subscriptions[topic_filter.filter] = topic_filter.max_qos
 
-    packet_id := next_packet_id_++
+    packet_id := session_.next_packet_id
     packet := SubscribePacket topic_filters --packet_id=packet_id
     send_ packet --packet_id=packet_id
 
@@ -456,7 +476,7 @@ class Client:
 
     if filters.is_empty: return
 
-    packet_id := next_packet_id_++
+    packet_id := session_.next_packet_id
     packet := UnsubscribePacket filters --packet_id=packet_id
     send_ packet --packet_id=packet_id
 
@@ -479,7 +499,7 @@ class Client:
       if is_closed: throw CLIENT_CLOSED_EXCEPTION
       if packet is ConnectPacket: throw "INVALID_PACKET"
       do_connected_: connection_.write packet
-      if packet_id: pending_[packet_id] = packet
+      if packet_id: session_.set_pending_ack packet --packet_id=packet_id
 
   do_connected_ [block]:
     if is_closed: throw CLIENT_CLOSED_EXCEPTION
@@ -537,26 +557,24 @@ class Client:
 
         // Before publishing messages, we need to subscribe to the topics we were subscribed to.
         // TODO(florian): also send/clear pending acks?
-        if not subscriptions_.is_empty:
+        if session_.has_subscriptions:
           topic_list := []
-          subscriptions_.do: | topic/string max_qos/int |
+          session_.subscriptions.do: | topic/string max_qos/int |
             topic_list.add (TopicFilter topic --max_qos=max_qos)
           subscribe_all topic_list
-          packet_id := next_packet_id_++
+          packet_id := session_.next_packet_id
           subscribe_packet := SubscribePacket topic_list --packet_id=packet_id
           connection_.write subscribe_packet
           // TODO(florian): the subscription here is qos=1, but we don't want to resend it
           // if the connection breaks. (Or at least not in the usual way.)
-          pending_[packet_id] = subscribe_packet
+          session_.set_pending_ack subscribe_packet --packet_id=packet_id
 
       finally: | is_exception _ |
         if is_exception:
           connection_.close
           close
 
-  /**
-  Tears down the client.
-  */
+  /** Tears down the client. */
   tear_down_:
     critical_do:
       state_ = STATE_CLOSED_
