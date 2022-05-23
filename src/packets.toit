@@ -35,6 +35,8 @@ abstract class Packet:
       return PubAckPacket.deserialize reader
     if kind == SubAckPacket.TYPE:
       return SubAckPacket.deserialize reader size
+    if kind == UnsubAckPacket.TYPE:
+      return UnsubAckPacket.deserialize reader
     if kind == PingRespPacket.TYPE:
       return PingRespPacket.deserialize reader
 
@@ -259,7 +261,7 @@ class UnsubscribePacket extends Packet:
 class UnsubAckPacket extends Packet implements PacketIDAck:
   static TYPE ::= 11
 
-  packet_id/int
+  packet_id /int
 
   constructor .packet_id:
     super TYPE

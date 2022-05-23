@@ -560,11 +560,19 @@ class Client:
     packet := SubscribePacket topic_filters --packet_id=packet_id
     send_ packet --packet_id=packet_id
 
-  /**
-  Unsubscribes from a single topic $filter.
-  */
+  /** Unsubscribes from a single topic $filter. */
   unsubscribe filter/string -> none:
-    // Not implemented yet.
+    unsubscribe_all [filter]
+
+  /** Unsubscribes from the list of topic $filters. */
+  unsubscribe_all filters/List -> none:
+    if is_closed: throw CLIENT_CLOSED_EXCEPTION
+    packet_id := next_packet_id_++
+    packet := UnsubscribePacket filters --packet_id=packet_id
+    wait_for_ack_ packet_id: | latch/monitor.Latch |
+      send_ packet
+      ack := latch.get
+      if not ack: throw CLIENT_CLOSED_EXCEPTION
 
   request_ping_after_current_packet:
     should_send_ping_ = true
