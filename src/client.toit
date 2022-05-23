@@ -186,15 +186,11 @@ class Client:
       else:
         throw CLIENT_CLOSED_EXCEPTION
 
-  /**
-  Unsubscribe to a single topic $filter.
-  */
+  /** Unsubscribes from a single topic $filter. */
   unsubscribe filter/string -> none:
     unsubscribe_all [filter]
 
-  /**
-  Unsubscribe to the list of topic $filters.
-  */
+  /** Unsubscribes from the list of topic $filters. */
   unsubscribe_all filters/List -> none:
     if is_closed: throw CLIENT_CLOSED_EXCEPTION
     packet_id := next_packet_id_++
