@@ -32,3 +32,5 @@ Tests:
 
 - let the handler throw.
   Should it be caught, or brings it down the whole client?
+
+- start connecting, then close the connection (with 'close') while CONNECTING is still active.

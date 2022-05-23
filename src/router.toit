@@ -111,15 +111,16 @@ class Router:
 
   start --attached/bool:
     if not attached: throw "INVALID_ARGUMENT"
-    client_.start
-        --on_packet = :: handle_packet_ it
+    client_.connect
+    client_.handle --on_packet=(:: handle_packet_ it)
 
   start --detached/bool --background/bool=false --on_error/Lambda=(:: logger_.error it) -> none:
     if not detached: throw "INVALID_ARGUMENT"
+    client_.connect
     task --background=background::
-      exception := catch: start --attached
+      exception := catch:
+        client_.handle --on_packet=(:: handle_packet_ it)
       if exception: on_error.call exception
-    client_.when_connected: return
 
   handle_packet_ packet/Packet:
     // We ack the packet as soon as we call the registered callback.
@@ -190,6 +191,12 @@ class Router:
   */
   unsubscribe filter/string -> none:
     client_.unsubscribe filter
+
+  /**
+  Unsubscribes from all $filters in the given list.
+  */
+  unsubscribe_all filters/List -> none:
+    client_.unsubscribe_all filters
 
   close -> none:
     client_.close

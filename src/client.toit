@@ -136,7 +136,7 @@ Establishes and maintains a connection to the broker.
 */
 interface ConnectionManager:
   // Must return the result of `receive_connect_ack`.
-  reconnect transport/ActivityMonitoringTransport [--send_connect] [--receive_connect_ack] -> any
+  connect transport/ActivityMonitoringTransport [--send_connect] [--receive_connect_ack] -> any
   should_try_reconnect transport/ActivityMonitoringTransport -> bool
   close -> none
 
@@ -147,7 +147,7 @@ class DefaultConnectionManager implements ConnectionManager:
 
   is_closed /bool := false
 
-  reconnect transport/ActivityMonitoringTransport [--send_connect] [--receive_connect_ack] -> any:
+  connect transport/ActivityMonitoringTransport [--send_connect] [--receive_connect_ack] -> any:
     failed_counter := 0
     while not is_closed:
       did_connect := false
@@ -211,7 +211,9 @@ class ActivityChecker_:
   Returns null if the connection is not alive anymore.
   */
   check -> Duration?:
-    client_.check_connected_
+    // TODO(florian): move the activity checker from the client to the connection.
+    if not client_.connection_ or not client_.connection_.is_alive: return keep_alive_
+
     if current_connection_ != client_.connection_:
       reset
 
@@ -260,17 +262,27 @@ When the connection to the broker is established with the clean-session bit, the
   messages that are lost.
 */
 class Client:
+  // TODO(florian): this should probably be part of the connection manager or
+  // the transport.
+  SEND_DISCONNECT_TIME_OUT_SECONDS_ /int ::= 5
+
   /** The client has been created. Handle has not been called yet. */
   static STATE_CREATED_ ::= 0
-  /** The client is connecting. */
-  static STATE_CONNECTING1_ ::= 1
-  static STATE_CONNECTING2_ ::= 2
-  /** The client is connected. */
-  static STATE_CONNECTED_ ::= 3
+  /**
+  The client is in the process of connecting.
+  */
+  static STATE_CONNECTING_ ::= 1
+  /**
+  The client is (or was) connected.
+  This is a necesarry precondition for calling $handle.
+  */
+  static STATE_CONNECTED_ ::= 2
+  /** The client is handling incoming packets. */
+  static STATE_HANDLING_ ::= 3
   /**
   The client is disconnected and in the process of shutting down.
   This only happens once the current message has been handled. That is, once
-    the $handle_ method's block has returned.
+    the $handle method's block has returned.
   */
   static STATE_CLOSING_ ::= 4
   /** The client is closed. */
@@ -283,13 +295,11 @@ class Client:
   logger_ /log.Logger?
 
   connection_ /Connection_? := null
-  connected_ /Barrier_ := Barrier_
-  reconnect_done_ /monitor.Latch? := null
+  connecting_ /monitor.Mutex := monitor.Mutex
 
+  // TODO(florian): move this into `Session_`.
   subscriptions_ /Map := {:}
-
   next_packet_id_/int? := 1
-
   pending_ / Map ::= {:}  // int -> Packet
 
   activity_task_ /Task_? := null
@@ -297,7 +307,7 @@ class Client:
   closed_ /Barrier_ ::= Barrier_
 
   /**
-  Serializes the senders.
+  A mutex to queue the senders.
 
   Relies on the fact that Toit mutexes are fair and execute them in the order
     in which they reached the mutex.
@@ -310,7 +320,7 @@ class Client:
   /**
   Constructs an MQTT client.
 
-  The client starts disconnected. Call $start to initiate the connection.
+  The client starts disconnected. Call $handle to initiate the connection.
   */
   constructor
       --options/ClientOptions
@@ -322,145 +332,119 @@ class Client:
     logger_ = logger
     connection_manager_ = connection_manager
 
-  start --on_packet/Lambda -> none:
+  connect -> none:
     if state_ != STATE_CREATED_: throw "INVALID_STATE"
     assert: not connection_
-    connect_
-    handle_ --on_packet=on_packet
+    state_ = STATE_CONNECTING_
+    reconnect_ --reason=null
+    state_ = STATE_CONNECTED_
 
-  handle_ --on_packet/Lambda -> none:
+    activity_task_ = task --background::
+      try:
+        checker := ActivityChecker_ this --keep_alive=options_.keep_alive
+        checker.run
+      finally:
+        activity_task_ = null
+
+  handle --on_packet/Lambda -> none:
+    if state_ != STATE_CONNECTED_: throw "INVALID_STATE"
+    state_ = STATE_HANDLING_
+
     try:
-      activity_task_ = task --background::
-        try:
-          checker := ActivityChecker_ this --keep_alive=options_.keep_alive
-          checker.run
-        finally:
-          activity_task_ = null
+      while true:
+        packet /Packet? := null
+        do_connected_: packet = connection_.read
+        if not packet: break
 
-      with_reconnect_:
-        while packet := connection_.read:
-          if packet is PublishPacket:
-            try:
-              on_packet.call packet
-            finally: | is_exception _ |
-              // Exceptions in the callback bring down the Mqtt client.
-              // This is harsh, but we don't want to lose messages.
-              if is_exception: connection_manager_.close
-          else if packet is ConnAckPacket:
-            if logger_: logger_.info "spurious conn-ack packet"
-          else if packet is PacketIDAck:
-            ack := packet as PacketIDAck
-            id := ack.packet_id
-            // TODO(florian): implement persistence layer.
-            pending_.remove id
-                --if_absent=: logger_.info "unmatched packet id: $id"
-          else:
-            if logger_: logger_.info "unexpected packet of type $packet.type"
-    finally:
+        if packet is PublishPacket:
+          on_packet.call packet
+        else if packet is ConnAckPacket:
+          if logger_: logger_.info "spurious conn-ack packet"
+        else if packet is PacketIDAck:
+          ack := packet as PacketIDAck
+          id := ack.packet_id
+          // TODO(florian): implement persistence layer.
+          pending_.remove id
+              --if_absent=: logger_.info "unmatched packet id: $id"
+        else:
+          if logger_: logger_.info "unexpected packet of type $packet.type"
+    finally: | is_exception exception |
+      // Exceptions in the callback bring down the Mqtt client.
+      // This is harsh, but we don't want to lose messages.
+      if is_exception:
+        connection_manager_.close
       tear_down_
       connection_ = null
 
-  with_reconnect_ [block]:
+  do_connected_ [block]:
+    if is_closing or is_closed: throw CLIENT_CLOSED_EXCEPTION
     while true:
-      current_connection := connection_
       // If the connection is still alive, or if the manager doesn't want us to reconnect, let the
       // exception go through.
-      exception := catch --unwind=(: connection_.is_alive or not connection_manager_.should_try_reconnect transport_):
-        if wait_for_connected: check_connected_
-        current_connection = connection_
+      should_abandon := :
+        connection_.is_alive or not connection_manager_.should_try_reconnect transport_
+
+      exception := catch --unwind=should_abandon:
         block.call
         return
       assert: exception != null
-      if is_closing or is_closed: return
-      reconnect_ --reason=exception --old_connection=current_connection
+      if is_closing or is_closed: throw CLIENT_CLOSED_EXCEPTION
+      reconnect_ --reason=exception
+      if is_closing or is_closed: throw CLIENT_CLOSED_EXCEPTION
 
-  reconnect_ --reason --old_connection/Connection_ -> none:
-    assert: not connection_.is_alive
-    // TODO(florian): implement exponential back-off or something similar.
-    if connection_ != old_connection:
-      exception := reconnect_done_.get
-      if exception: throw exception
+  reconnect_ --reason -> none:
+    assert: not connection_ or not connection_.is_alive
+    old_connection := connection_
 
-    if not connected_.has_value:
-      // Make sure anyone listening on the barrier makes progress.
-      connected_.set reason
-    connected_ = Barrier_
-    connection_ = null
-    should_send_ping_ = false
-    reconnect_done_ = monitor.Latch
-    try:
-      transport_.reconnect
-    finally: | is_exception exception |
-      reconnect_done_.set (is_exception ? exception : null)
-    connect_
+    connecting_.do:
+      // Check that nobody else created the connection in the meantime.
+      if connection_ != old_connection: return
+      try:
+        connection_ = Connection_ transport_
+        response := connection_manager_.connect transport_
+            --send_connect = :
+              packet := ConnectPacket options_.client_id
+                  --username=options_.username
+                  --password=options_.password
+                  --keep_alive=options_.keep_alive
+                  --last_will=options_.last_will
+              connection_.write packet
+            --receive_connect_ack = : connection_.read
+        if not response: throw "INTERNAL_ERROR"
+        if is_closed: throw CLIENT_CLOSED_EXCEPTION
+        ack := (response as ConnAckPacket)
+        return_code := ack.return_code
+        if return_code != 0:
+          refused_reason := "CONNECTION_REFUSED"
+          if return_code == 1: refused_reason = "UNACCEPTABLE_PROTOCOL_VERSION"
+          if return_code == 2: refused_reason = "IDENTIFIER_REJECTED"
+          if return_code == 3: refused_reason = "SERVER_UNAVAILABLE"
+          if return_code == 4: refused_reason = "BAD_USERNAME_OR_PASSWORD"
+          if return_code == 5: refused_reason = "NOT_AUTHORIZED"
 
-  with_reconnect_ [block] --wait_for_connected/bool:
-    while true:
-      current_connection := connection_
-      // If the connection is still alive, or if the transport doesn't support reconnection
-      // anyway, don't even try to reconnect.
-      exception := catch --unwind=(: connection_.is_alive or not transport_.supports_reconnect):
-        if wait_for_connected: check_connected_
-        current_connection = connection_
-        block.call
-        return
-      assert: exception != null
-      if is_closing or is_closed: return
-      reconnect_ --reason=exception --old_connection=current_connection
+          connection_.close --reason=refused_reason
+          // No need to retry.
+          close --no-disconnect
+          throw refused_reason
 
-  connect_:
-    connection_ = Connection_ transport_
-    state_ = STATE_CONNECTING1_
-    packet := ConnectPacket options_.client_id
-        --username=options_.username
-        --password=options_.password
-        --keep_alive=options_.keep_alive
-        --last_will=options_.last_will
-    connection_.send packet
-    state_ = STATE_CONNECTING2_
+        // Before publishing messages, we need to subscribe to the topics we were subscribed to.
+        // TODO(florian): also send/clear pending acks?
+        if not subscriptions_.is_empty:
+          topic_list := []
+          subscriptions_.do: | topic/string max_qos/int |
+            topic_list.add (TopicFilter topic --max_qos=max_qos)
+          subscribe_all topic_list
+          packet_id := next_packet_id_++
+          subscribe_packet := SubscribePacket topic_list --packet_id=packet_id
+          connection_.write subscribe_packet
+          // TODO(florian): the subscription here is qos=1, but we don't want to resend it
+          // if the connection breaks. (Or at least not in the usual way.)
+          pending_[packet_id] = subscribe_packet
 
-  handle_connack_ packet/ConnAckPacket:
-    if state_ != STATE_CONNECTING2_:
-      if logger_: logger_.info "Received spurious CONNACK"
-      return
-
-    if packet.return_code != 0:
-      state_ = STATE_CLOSED_
-      connected_.set "connection refused: $packet.return_code"
-      return
-
-    state_ = STATE_CONNECTED_
-    connected_.set null
-
-    // Before publishing messages, we need to subscribe to the topics we were subscribed to.
-    // TODO(florian): also send/clear pending acks.
-    // TODO(florian): move the sub call to the front of the queue.
-    if not subscriptions_.is_empty:
-      topic_list := []
-      subscriptions_.do: | topic/string max_qos/int |
-        topic_list.add (TopicFilter topic --max_qos=max_qos)
-      subscribe_all topic_list
-      packet_id := next_packet_id_++
-      subscribe_packet := SubscribePacket topic_list --packet_id=packet_id
-      connection_.send packet
-      if packet_id: pending_[packet_id] = packet
-      send_ packet --packet_id=packet_id
-
-  /**
-  Waits for the connection to be connected and then calls the given $block.
-
-  If the connection could not connect throws.
-  If the connection is closed throws.
-  */
-  when_connected [block]:
-    check_connected_
-    block.call
-
-  check_connected_:
-    exception := connected_.get
-    if exception: throw exception
-    // Check that we are still connected and haven't been closed in the meantime.
-    if not connection_.is_alive: throw CLIENT_CLOSED_EXCEPTION
+      finally: | is_exception _ |
+        if is_exception:
+          connection_.close
+          close
 
   /**
   Tears down the client.
@@ -468,46 +452,60 @@ class Client:
   tear_down_:
     critical_do:
       state_ = STATE_CLOSED_
+      if connection_:
+        connection_.close
+        connection_ = null
       if activity_task_:
         activity_task_.cancel
         activity_task_ = null
       closed_.set true
-      if not connected_.has_value:
-        connected_.set CLIENT_CLOSED_EXCEPTION
 
   /**
   Closes the client.
 
-  Unless the client is already closed, executes an orderly disconnect.
+  If $disconnect is true and the connection is still alive send a disconnect packet,
+    informing the broker of the disconnection.
   */
-  close:
+  close --disconnect/bool=true:
     if is_closing or is_closed: return
+
+    if state_ == STATE_CREATED_:
+      state_ = STATE_CLOSED_
+
+    if state_ == STATE_CONNECTING_ or state_ == STATE_CONNECTED_:
+      assert: connection_
+      state_ = STATE_CLOSED_
+      connection_.close
+      return
+
+    assert: state_ == STATE_HANDLING_
 
     state_ = STATE_CLOSING_
 
     // Note that disconnect packets don't need a packet id (which is important as
     // the packet_id counter is used as marker that the client is closed).
     if connection_.is_alive:
-      catch --trace: connection_.send DisconnectPacket
+      if disconnect:
+        catch:
+          with_timeout --ms=SEND_DISCONNECT_TIME_OUT_SECONDS_ * 1000:
+            connection_.write DisconnectPacket
 
-    // The connection disconnect will stop the $Connection_.handle. This in turn will invoke
-    // the `tear_down` in $start method.
-    connection_.close
-
-    closed_.get
-
-  /** Whether the client is closed. */
-  is_closed -> bool:
-    return state_ == STATE_CLOSED_
+      // The connection disconnect will stop any receiving in the $handle method.
+      // This, in turn, will invoke the `tear_down` in $handle method.
+      connection_.close
 
   /**
   Whether the client is closing.
 
-  A graceful closing requires the client to send a packet to the broker. This means that
-    a client can be in closing state for a while.
+  After a call to `close` (internal or external), the client switches to a closing state.
+  It is only considered fully closed when $handle returns.
   */
   is_closing -> bool:
     return state_ == STATE_CLOSING_
+
+  /** Whether the client is closed. */
+  is_closed -> bool:
+    return state_ == STATE_CLOSED_
 
   /**
   Publishes an MQTT message on $topic.
@@ -526,7 +524,9 @@ class Client:
   Not all MQTT brokers support $retain.
   */
   publish topic/string payload/ByteArray --qos=1 --retain=false -> none:
-    if is_closed: throw CLIENT_CLOSED_EXCEPTION
+    // The client is only active once $start has been called.
+    if state_ == STATE_CREATED_: throw "INVALID_STATE"
+    if is_closing or is_closed: throw CLIENT_CLOSED_EXCEPTION
     if qos != 0 and qos != 1: throw "INVALID_ARGUMENT"
 
     packet_id := qos > 0 ? next_packet_id_++ : null
@@ -550,8 +550,8 @@ class Client:
   Subscribes to the given list $topic_filters of type $TopicFilter.
   */
   subscribe_all topic_filters/List -> none:
-    if topic_filters.is_empty: throw "INVALID_ARGUMENT"
     if is_closed: throw CLIENT_CLOSED_EXCEPTION
+    if topic_filters.is_empty: return
 
     topic_filters.do: | topic_filter/TopicFilter |
       subscriptions_[topic_filter.filter] = topic_filter.max_qos
@@ -564,15 +564,14 @@ class Client:
   unsubscribe filter/string -> none:
     unsubscribe_all [filter]
 
-  /** Unsubscribes from the list of topic $filters. */
+  /** Unsubscribes from the list of topic $filters (of type $string). */
   unsubscribe_all filters/List -> none:
     if is_closed: throw CLIENT_CLOSED_EXCEPTION
+    if filters.is_empty: return
+
     packet_id := next_packet_id_++
     packet := UnsubscribePacket filters --packet_id=packet_id
-    wait_for_ack_ packet_id: | latch/monitor.Latch |
-      send_ packet
-      ack := latch.get
-      if not ack: throw CLIENT_CLOSED_EXCEPTION
+    send_ packet --packet_id=packet_id
 
   request_ping_after_current_packet:
     should_send_ping_ = true
@@ -586,12 +585,11 @@ class Client:
       is_sending_ = true
       try:
         if packet is ConnectPacket: throw "INVALID_PACKET"
-        with_reconnect_ --wait_for_connected:
-          connection_.send packet
-          if packet_id: pending_[packet_id] = packet
-          if should_send_ping_:
-            should_send_ping_ = false
-            connection_.send PingReqPacket
+        do_connected_: connection_.write packet
+        if packet_id: pending_[packet_id] = packet
+        if should_send_ping_:
+          should_send_ping_ = false
+          connection_.write PingReqPacket
       finally:
         is_sending_ = false
 
@@ -607,4 +605,4 @@ class Client:
       id := (packet as PublishPacket).packet_id
       if id:
         ack := PubAckPacket id
-        connection_.send ack
+        do_connected_: connection_.write ack
