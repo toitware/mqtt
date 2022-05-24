@@ -34,3 +34,7 @@ Tests:
   Should it be caught, or brings it down the whole client?
 
 - start connecting, then close the connection (with 'close') while CONNECTING is still active.
+
+- transport block at first write (throw in 'write' of transport.)
+
+- connect, then publish but don't call handle.

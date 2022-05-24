@@ -7,14 +7,15 @@ import .last_will
 /**
 Options to connect to an MQTT broker.
 */
-class ClientOptions:
+class SessionOptions:
   static DEFAULT_KEEP_ALIVE ::= Duration --s=60
 
-  client_id  /string
-  username   /string?
-  password   /string?
-  keep_alive /Duration
-  last_will  /LastWill?
+  client_id     /string
+  clean_session /bool
+  username      /string?
+  password      /string?
+  keep_alive    /Duration
+  last_will     /LastWill?
 
   /**
   The $client_id (client identifier) will be used by the broker to identify a client.
@@ -33,6 +34,7 @@ class ClientOptions:
   */
   constructor
       --.client_id
+      --.clean_session = false
       --.username = null
       --.password = null
       --.keep_alive = DEFAULT_KEEP_ALIVE

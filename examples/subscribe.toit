@@ -11,10 +11,10 @@ main:
   // socket := net.open.tcp_connect "127.0.0.1" 1883
   // transport := mqtt.TcpTransport socket
 
-  options := mqtt.ClientOptions --client_id="toit-subscribe"
+  options := mqtt.SessionOptions --client_id="toit-subscribe"
 
   router := mqtt.Router
-    --client_options = options
+    --session_options = options
     --transport = transport
 
   router.start --detached

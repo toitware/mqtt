@@ -18,7 +18,8 @@ abstract class Packet:
 
   constructor .type --.flags=0:
 
-  static deserialize reader/reader.BufferedReader -> Packet:
+  static deserialize reader/reader.BufferedReader -> Packet?:
+    if not reader.can_ensure 1: return null
     byte1 := reader.read_byte
     kind := byte1 >> 4
     flags := byte1 & 0xf
@@ -80,24 +81,27 @@ abstract class Packet:
 class ConnectPacket extends Packet:
   static TYPE ::= 1
 
-  client_id/string
-  username/string?
-  password/string?
-  keep_alive/Duration?
-  last_will/LastWill?
+  client_id /string
+  clean_session /bool
+  username /string?
+  password /string?
+  keep_alive /Duration?
+  last_will /LastWill?
 
-  constructor .client_id --.username=null --.password=null --.keep_alive=null --.last_will=null:
+  constructor .client_id --.clean_session --.username --.password --.keep_alive --.last_will:
     super TYPE
 
   variable_header -> ByteArray:
-    connect_flags := 0b0000_0010
-    if username: connect_flags |= 0b1000_0000
-    if password: connect_flags |= 0b0100_0000
+    connect_flags := 0
+    print "is clean session: $clean_session"
+    if clean_session: connect_flags |= 0b0000_0010
+    if username:      connect_flags |= 0b1000_0000
+    if password:      connect_flags |= 0b0100_0000
     if last_will:
-      connect_flags            |= 0b0000_0100
-      connect_flags            |= last_will.qos << 3
+      connect_flags                 |= 0b0000_0100
+      connect_flags                 |= last_will.qos << 3
       if last_will.retain:
-        connect_flags          |= 0b0010_0000
+        connect_flags               |= 0b0010_0000
 
 
     data := #[0, 4, 'M', 'Q', 'T', 'T', 4, connect_flags, 0, 0]
@@ -119,14 +123,17 @@ class ConnectPacket extends Packet:
 class ConnAckPacket extends Packet:
   static TYPE ::= 2
 
-  return_code/int
+  return_code /int
+  session_present /bool
 
   constructor:
     return_code = 0
+    session_present = false
     super TYPE
 
   constructor.deserialize reader/reader.BufferedReader:
     data := reader.read_bytes 2
+    session_present = data[0] & 0x01 != 0
     return_code = data[1]
     super TYPE
 

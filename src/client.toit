@@ -95,10 +95,11 @@ class Connection_:
 
   closing_reason_ /any := null
 
-  keep_alive_duration_ /Duration
+  keep_alive_duration_ /Duration?
   activity_task_ /Task_? := null
 
-  constructor .transport_ --keep_alive:
+  /** Constructs a new connection. */
+  constructor .transport_ --keep_alive/Duration?:
     reader_ = reader.BufferedReader transport_
     writer_ = writer.Writer transport_
     keep_alive_duration_ = keep_alive
@@ -136,16 +137,18 @@ class Connection_:
         state_ = STATE_CLOSED_
 
   close --reason=null:
+    print "closing connection"
     if is_closed: return
     assert: closing_reason_ == null
     critical_do:
       closing_reason_ = reason
-      // By setting the state to closied we quell any error messages from disconnecting the transport.
+      // By setting the state to closed we quell any error messages from disconnecting the transport.
       state_ = STATE_CLOSED_
       catch: transport_.close
       if activity_task_:
         activity_task_.cancel
         activity_task_ = null
+    print "closing connection done"
 
   is_writing -> bool:
     return is_writing_
@@ -172,6 +175,7 @@ class Connection_:
       finally: | is_exception exception |
         is_writing_ = false
         if is_exception:
+          print "closing because of $exception.value"
           close --reason=exception
 
 /**
@@ -184,68 +188,168 @@ It keeps track of whether trying to connect again makes sense, and when it
 It is also called for the first time the client connects to the broker.
 */
 interface ReconnectionStrategy:
-  // Must return the result of `receive_connect_ack`.
-  connect transport/ActivityMonitoringTransport [--send_connect] [--receive_connect_ack] -> any
+  /**
+  Is called when the client wants to establish a connection through the given $transport.
+
+  The strategy should first call $send_connect, followed by a $receive_connect_ack. If
+    the connection is unsuccessful, it may retry.
+
+  The $receive_connect_ack block returns whether the broker had a session for this client.
+
+  The $is_initial_connection is true if this is the first time the client connects to the broker.
+  */
+  connect -> none
+      transport/ActivityMonitoringTransport
+      --is_initial_connection /bool
+      [--reconnect_transport]
+      [--send_connect]
+      [--receive_connect_ack]
+      [--disconnect]
+
+  /** Whether the client should even try to reconnect. */
   should_try_reconnect transport/ActivityMonitoringTransport -> bool
+
+  /** Closes the strategy, indicating that no further reconnection attempts should be done. */
   close -> none
 
-class DefaultReconnectionStrategy implements ReconnectionStrategy:
-  static RECEIVE_CONNECT_TIME_OUT_SECONDS_ /int ::= 5
-  static ATTEMPT_DELAYS_MS_ /List ::= [1_000, 5_000, 15_000]
+abstract class DefaultReconnectionStrategyBase implements ReconnectionStrategy:
+  static DEFAULT_RECEIVE_CONNECT_TIMEOUT /Duration ::= Duration --s=5
+  static DEFAULT_ATTEMPT_DELAYS /List ::= [
+    Duration --s=1,
+    Duration --s=5,
+    Duration --s=15,
+  ]
 
-  is_closed /bool := false
+  receive_connect_timeout_ /Duration
+  attempt_delays_ /List
 
-  connect transport/ActivityMonitoringTransport [--send_connect] [--receive_connect_ack] -> any:
-    failed_counter := 0
-    while not is_closed:
+  is_closed_ := false
+
+  constructor
+      --receive_connect_timeout /Duration = DEFAULT_RECEIVE_CONNECT_TIMEOUT
+      --attempt_delays /List /*Duration*/ = DEFAULT_ATTEMPT_DELAYS:
+    receive_connect_timeout_ = receive_connect_timeout
+    attempt_delays_ = attempt_delays
+
+
+  /**
+  Tries to connect, potentially retrying with delays.
+
+  Returns null if the strategy was closed.
+  Returns whether the broker had a session for this client, otherwise.
+  */
+  do_connect transport/ActivityMonitoringTransport
+      [--reconnect_transport]
+      [--send_connect]
+      [--receive_connect_ack]:
+    for i := -1; i < attempt_delays_.size; i++:
+      if is_closed: return null
+      if i >= 0:
+        sleep attempt_delays_[i]
+        if is_closed: return null
+        reconnect_transport.call
+
       did_connect := false
 
-      should_abandon := :
-        // If we did connect, we managed to send and receive packets.
-        // As such, we consider the network as "working" and will retry.
-        // If we didn't manage to connect, we will only retry if we haven't exhausted
-        //   the retry-attempts.
-        is_closed or (not did_connect and failed_counter >= ATTEMPT_DELAYS_MS_.size)
+      is_last_attempt := (i == attempt_delays_.size - 1)
 
-      catch --unwind=should_abandon:
+      catch --unwind=(: is_closed or is_last_attempt):
         send_connect.call
-        ack := null
-        with_timeout --ms=(RECEIVE_CONNECT_TIME_OUT_SECONDS_ * 1000):
-          ack = receive_connect_ack.call
-
-        did_connect = true
-
-        // If the client is not authorized to connect, then the ack packet will contain an
-        // error code. The caller of this method will then call the $close method, so that it
-        // won't try again (which would be pointless).
-        // Also, if there is an exception independent of the connection, then the client also
-        // closes the connection and returns.
-        return ack
+        return with_timeout receive_connect_timeout_:
+          receive_connect_ack.call
 
       if is_closed: return null
 
-      failed_counter++
-      assert: failed_counter <= ATTEMPT_DELAYS_MS_.size
-      // TODO(florian): should we split the sleep into smaller portions so that we can check if
-      // the is_closed flag is set?
-      sleep --ms=ATTEMPT_DELAYS_MS_[failed_counter - 1]
+    unreachable
 
-    return null
+  abstract connect -> none
+      transport/ActivityMonitoringTransport
+      --is_initial_connection /bool
+      [--reconnect_transport]
+      [--send_connect]
+      [--receive_connect_ack]
+      [--disconnect]
+
+  abstract should_try_reconnect transport/ActivityMonitoringTransport -> bool
+
+  is_closed -> bool:
+    return is_closed_
+
+  close -> none:
+    is_closed_ = true
+
+
+class DefaultCleanSessionReconnectionStrategy extends DefaultReconnectionStrategyBase:
+
+  constructor
+      --receive_connect_timeout /Duration = DefaultReconnectionStrategyBase.DEFAULT_RECEIVE_CONNECT_TIMEOUT
+      --attempt_delays /List /*Duration*/ = DefaultReconnectionStrategyBase.DEFAULT_ATTEMPT_DELAYS:
+    super --receive_connect_timeout=receive_connect_timeout --attempt_delays=attempt_delays
+
+  connect -> none
+      transport/ActivityMonitoringTransport
+      --is_initial_connection /bool
+      [--reconnect_transport]
+      [--send_connect]
+      [--receive_connect_ack]
+      [--disconnect]:
+    // The clean session does not reconnect.
+    if not is_initial_connection: throw "INVALID_STATE"
+    session_exists := do_connect transport
+        --reconnect_transport = reconnect_transport
+        --send_connect = send_connect
+        --receive_connect_ack = receive_connect_ack
+    if session_exists:
+      // A clean-session strategy can't find an existing session.
+      throw "INVALID_STATE"
+
+  should_try_reconnect transport/ActivityMonitoringTransport -> bool:
+    return false
+
+class DefaultSessionReconnectionStrategy extends DefaultReconnectionStrategyBase:
+  session_reset_callback_ /Lambda?
+
+  constructor
+      --receive_connect_timeout /Duration = DefaultReconnectionStrategyBase.DEFAULT_RECEIVE_CONNECT_TIMEOUT
+      --attempt_delays /List /*Duration*/ = DefaultReconnectionStrategyBase.DEFAULT_ATTEMPT_DELAYS
+      --on_session_reset /Lambda? = null:
+    session_reset_callback_ = on_session_reset
+    super --receive_connect_timeout=receive_connect_timeout --attempt_delays=attempt_delays
+
+  connect -> none
+      transport/ActivityMonitoringTransport
+      --is_initial_connection /bool
+      [--reconnect_transport]
+      [--send_connect]
+      [--receive_connect_ack]
+      [--disconnect]:
+    session_exists := do_connect transport
+        --reconnect_transport = reconnect_transport
+        --send_connect = send_connect
+        --receive_connect_ack = receive_connect_ack
+
+    if is_initial_connection or session_exists: return
+
+    // The session was reset.
+    if session_reset_callback_:
+      session_reset_callback_.call
+    else:
+      disconnect.call
+      throw "SESSION_EXPIRED"
 
   should_try_reconnect transport/ActivityMonitoringTransport -> bool:
     return transport.supports_reconnect
 
+  is_closed -> bool:
+    return is_closed_
+
   close -> none:
-    is_closed = true
+    is_closed_ = true
 
 class Session_:
   subscriptions /Map ::= {:}
-  next_packet_id_/int? := 1
-  pending_ / Map ::= {:}  // int -> Packet.
-
-  logger_ /log.Logger
-
-  constructor .logger_:
+  next_packet_id_ /int? := 1
+  pending_ /Map ::= {:}  // int -> Packet.
 
   set_pending_ack packet/Packet --packet_id/int:
     pending_[packet_id] = packet
@@ -270,10 +374,6 @@ When the connection to the broker is established with the clean-session bit, the
   messages that are lost.
 */
 class Client:
-  // TODO(florian): this should probably be part of the connection manager or
-  // the transport.
-  SEND_DISCONNECT_TIME_OUT_SECONDS_ /int ::= 5
-
   /** The client has been created. Handle has not been called yet. */
   static STATE_CREATED_ ::= 0
   /**
@@ -298,14 +398,16 @@ class Client:
 
   state_ /int := STATE_CREATED_
 
-  options_ /ClientOptions
-  transport_ /ActivityMonitoringTransport
+  options_ /SessionOptions
+  transport_ /ActivityMonitoringTransport := ?
   logger_ /log.Logger?
 
   session_ /Session_? := null
 
   connection_ /Connection_? := null
   connecting_ /monitor.Mutex := monitor.Mutex
+
+  handling_latch_ /monitor.Latch := monitor.Latch
 
   /**
   A mutex to queue the senders.
@@ -315,7 +417,7 @@ class Client:
   */
   sending_ /monitor.Mutex := monitor.Mutex
 
-  reconnection_strategy_ /ReconnectionStrategy
+  reconnection_strategy_ /ReconnectionStrategy? := null
 
   /**
   Constructs an MQTT client.
@@ -324,33 +426,42 @@ class Client:
     the connection.
   */
   constructor
-      --options/ClientOptions
-      --transport/Transport
-      --logger/log.Logger?
-      --reconnection_strategy /ReconnectionStrategy = DefaultReconnectionStrategy:
+      --options   /SessionOptions
+      --transport /Transport
+      --logger    /log.Logger?:
     options_ = options
     transport_ = ActivityMonitoringTransport.private_(transport)
     logger_ = logger
-    reconnection_strategy_ = reconnection_strategy
 
-  connect -> none:
+  connect -> none
+      --reconnection_strategy /ReconnectionStrategy =
+          (options_.clean_session
+            ? DefaultCleanSessionReconnectionStrategy
+            : DefaultSessionReconnectionStrategy):
+    reconnection_strategy_ = reconnection_strategy
     if state_ != STATE_CREATED_: throw "INVALID_STATE"
     assert: not connection_
-    session_ = Session_ logger_
+    session_ = Session_
 
     state_ = STATE_CONNECTING_
-    reconnect_ --reason=null
+    print "connect"
+    reconnect_ --is_initial_connection
+    print "connect done"
     state_ = STATE_CONNECTED_
 
   handle --on_packet/Lambda -> none:
+    print "handling"
     if state_ != STATE_CONNECTED_: throw "INVALID_STATE"
     state_ = STATE_HANDLING_
 
     try:
+      handling_latch_.set true
       while true:
         packet /Packet? := null
         do_connected_: packet = connection_.read
-        if not packet: break
+        if not packet:
+          if not is_closed: throw reader.UNEXPECTED_END_OF_READER_EXCEPTION
+          break
 
         if packet is PublishPacket:
           on_packet.call packet
@@ -367,8 +478,11 @@ class Client:
         else:
           if logger_: logger_.info "unexpected packet of type $packet.type"
     finally:
-      reconnection_strategy_.close
+      if reconnection_strategy_: reconnection_strategy_.close
       tear_down_
+
+  when_handling [block] -> none:
+    handling_latch_.get
 
   /**
   Closes the client.
@@ -387,14 +501,20 @@ class Client:
 
     state_ = STATE_CLOSING_
 
+    if reconnection_strategy_:
+      reconnection_strategy_.close
+
     // Note that disconnect packets don't need a packet id (which is important as
     // the packet_id counter is used as marker that the client is closed).
     if connection_.is_alive:
       if disconnect:
-        catch:
-          with_timeout --ms=SEND_DISCONNECT_TIME_OUT_SECONDS_ * 1000:
-            connection_.write DisconnectPacket
+        catch: connection_.write DisconnectPacket
+        // TODO(florian): we should wait for the reader to return `null` before
+        // killing the connection.
 
+
+      // If there was a disconnect packet, then the broker should shut down the connection.
+      // If that didn't work, or if we didn't send one, just shut the connection down now.
       // The connection disconnect will stop any receiving in the $handle method.
       // This, in turn, will invoke the `tear_down` in $handle method.
       connection_.close
@@ -425,6 +545,7 @@ class Client:
   Not all MQTT brokers support $retain.
   */
   publish topic/string payload/ByteArray --qos=1 --retain=false -> none:
+    print "publishing"
     if is_closed: throw CLIENT_CLOSED_EXCEPTION
     // The client is only active once $start has been called.
     if state_ != STATE_HANDLING_: throw "INVALID_STATE"
@@ -509,65 +630,67 @@ class Client:
       should_abandon := :
         connection_.is_alive or not reconnection_strategy_.should_try_reconnect transport_
 
-      exception := catch --unwind=should_abandon:
+      exception := catch --unwind=should_abandon --trace:
         block.call
         return
       assert: exception != null
       if is_closed: throw CLIENT_CLOSED_EXCEPTION
-      reconnect_ --reason=exception
+      reconnect_ --is_initial_connection=false
       if is_closed: throw CLIENT_CLOSED_EXCEPTION
 
-  reconnect_ --reason -> none:
+  reconnect_ --is_initial_connection/bool -> none:
     assert: not connection_ or not connection_.is_alive
     old_connection := connection_
 
     connecting_.do:
       // Check that nobody else reconnected while we took the lock.
       if connection_ != old_connection: return
-      try:
+
+      if not connection_:
+        assert: is_initial_connection
         connection_ = Connection_ transport_ --keep_alive=options_.keep_alive
-        response := reconnection_strategy_.connect transport_
+
+      try:
+        reconnection_strategy_.connect transport_
+            --is_initial_connection = is_initial_connection
+            --reconnect_transport = :
+              transport_.reconnect
+              connection_ = Connection_ transport_ --keep_alive=options_.keep_alive
             --send_connect = :
               packet := ConnectPacket options_.client_id
+                  --clean_session=options_.clean_session
                   --username=options_.username
                   --password=options_.password
                   --keep_alive=options_.keep_alive
                   --last_will=options_.last_will
               connection_.write packet
-            --receive_connect_ack = : connection_.read
-        if not response: throw "INTERNAL_ERROR"
-        if is_closed: throw CLIENT_CLOSED_EXCEPTION
-        ack := (response as ConnAckPacket)
-        return_code := ack.return_code
-        if return_code != 0:
-          refused_reason := "CONNECTION_REFUSED"
-          if return_code == 1: refused_reason = "UNACCEPTABLE_PROTOCOL_VERSION"
-          if return_code == 2: refused_reason = "IDENTIFIER_REJECTED"
-          if return_code == 3: refused_reason = "SERVER_UNAVAILABLE"
-          if return_code == 4: refused_reason = "BAD_USERNAME_OR_PASSWORD"
-          if return_code == 5: refused_reason = "NOT_AUTHORIZED"
+            --receive_connect_ack = :
+              response := connection_.read
+              if not response: throw "INTERNAL_ERROR"
+              if is_closed: throw CLIENT_CLOSED_EXCEPTION
+              ack := (response as ConnAckPacket)
+              return_code := ack.return_code
+              if return_code != 0:
+                refused_reason := "CONNECTION_REFUSED"
+                if return_code == 1: refused_reason = "UNACCEPTABLE_PROTOCOL_VERSION"
+                else if return_code == 2: refused_reason = "IDENTIFIER_REJECTED"
+                else if return_code == 3: refused_reason = "SERVER_UNAVAILABLE"
+                else if return_code == 4: refused_reason = "BAD_USERNAME_OR_PASSWORD"
+                else if return_code == 5: refused_reason = "NOT_AUTHORIZED"
 
-          connection_.close --reason=refused_reason
-          // No need to retry.
-          close --no-disconnect
-          throw refused_reason
+                connection_.close --reason=refused_reason
+                // No need to retry.
+                close --no-disconnect
+                throw refused_reason
+              ack.session_present
+            --disconnect = :
+              close --disconnect
+
+        // TODO(florian): resend pending messages if we have the old session.
+        // Send them as dupes.
 
         // Make sure the connection sends pings so the broker doesn't drop us.
         connection_.keep_alive --background
-
-        // Before publishing messages, we need to subscribe to the topics we were subscribed to.
-        // TODO(florian): also send/clear pending acks?
-        if session_.has_subscriptions:
-          topic_list := []
-          session_.subscriptions.do: | topic/string max_qos/int |
-            topic_list.add (TopicFilter topic --max_qos=max_qos)
-          subscribe_all topic_list
-          packet_id := session_.next_packet_id
-          subscribe_packet := SubscribePacket topic_list --packet_id=packet_id
-          connection_.write subscribe_packet
-          // TODO(florian): the subscription here is qos=1, but we don't want to resend it
-          // if the connection breaks. (Or at least not in the usual way.)
-          session_.set_pending_ack subscribe_packet --packet_id=packet_id
 
       finally: | is_exception _ |
         if is_exception:
@@ -578,7 +701,5 @@ class Client:
   tear_down_:
     critical_do:
       state_ = STATE_CLOSED_
-      if connection_:
-        connection_.close
-        connection_ = null
+      connection_.close
 

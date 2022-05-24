@@ -103,24 +103,25 @@ class Router:
     See $TcpTransport.
   */
   constructor
-      --client_options / ClientOptions
+      --session_options /SessionOptions
       --transport /Transport
       --logger /log.Logger? = log.default:
     logger_ = logger
-    client_ = Client --options=client_options --transport=transport --logger=logger
+    client_ = Client --options=session_options --transport=transport --logger=logger
 
   start --attached/bool:
     if not attached: throw "INVALID_ARGUMENT"
     client_.connect
     client_.handle --on_packet=(:: handle_packet_ it)
 
-  start --detached/bool --background/bool=false --on_error/Lambda=(:: logger_.error it) -> none:
+  start --detached/bool --background/bool=false --on_error/Lambda=(:: throw it) -> none:
     if not detached: throw "INVALID_ARGUMENT"
     client_.connect
     task --background=background::
-      exception := catch:
+      exception := catch --trace:
         client_.handle --on_packet=(:: handle_packet_ it)
       if exception: on_error.call exception
+    client_.when_handling: return
 
   handle_packet_ packet/Packet:
     // We ack the packet as soon as we call the registered callback.

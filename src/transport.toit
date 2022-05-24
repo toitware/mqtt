@@ -62,7 +62,11 @@ class ActivityMonitoringTransport implements Transport:
 
   constructor.private_ .wrapped_transport_:
 
+  counter := 0
   write bytes/ByteArray -> int:
+    if counter++ % 5 == 0:
+      print "oops"
+      throw "oops"
     try:
       is_writing = true
       writing_since_us = Time.monotonic_us
