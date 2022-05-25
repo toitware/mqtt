@@ -121,7 +121,7 @@ class Router:
       exception := catch --trace:
         client_.handle --on_packet=(:: handle_packet_ it)
       if exception: on_error.call exception
-    client_.when_handling: return
+    client_.when_running: return
 
   handle_packet_ packet/Packet:
     // We ack the packet as soon as we call the registered callback.

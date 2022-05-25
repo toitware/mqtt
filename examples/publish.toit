@@ -20,7 +20,7 @@ main:
   client.start --detached
   print "connected to broker"
 
-  3.repeat:
+  4.repeat:
     client.publish "toit/example/publish_subscribe" "$it".to_byte_array
     print "published '$it'"
     sleep --ms=1000
