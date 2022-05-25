@@ -713,7 +713,24 @@ class Client:
 
   Not all MQTT brokers support $retain.
   */
-  publish topic/string payload/ByteArray --qos=1 --retain=false -> none:
+  publish topic/string payload/ByteArray --qos/int=1 --retain/bool=false -> none:
+    packet_id := send_publish_ topic payload --qos=qos --retain=retain
+    if qos == 1:
+      persistent_id := persistence_store.store topic payload --retain=retain
+      session_.set_pending_ack --packet_id=packet_id --persistent_id=persistent_id
+
+  /**
+  Publishes the MQTT message stored in the persistence store identified by $persistent_id.
+  */
+  publish_persisted persistent_id/int --qos=1 -> none:
+    persistence_store.get persistent_id
+        --if_absent=: throw "PERSISTED_MESSAGE_NOT_FOUND"
+        : | topic payload retain |
+          packet_id := send_publish_ topic payload --qos=qos --retain=retain
+          if qos == 1:
+            session_.set_pending_ack --packet_id=packet_id --persistent_id=persistent_id
+
+  send_publish_ topic/string payload/ByteArray --qos/int --retain/bool -> int?:
     if qos != 0 and qos != 1: throw "INVALID_ARGUMENT"
 
     packet_id := qos > 0 ? session_.next_packet_id : null
@@ -726,9 +743,7 @@ class Client:
         --packet_id=packet_id
 
     send_ packet
-    if qos == 1:
-      persistent_id := persistence_store.store topic payload --retain=retain
-      session_.set_pending_ack --packet_id=packet_id --persistent_id=persistent_id
+    return packet_id
 
   /**
   Subscribes to the given $filter with a max qos of $max_qos.
