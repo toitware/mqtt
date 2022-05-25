@@ -42,6 +42,12 @@ interface Transport implements reader.Reader:
   */
   reconnect -> none
 
+  /**
+  Whether the transport is closed.
+  If it $supports_reconnect then calling $reconnect reopens the transport.
+  */
+  is_closed -> bool
+
 /**
 A transport that monitors activity on a wrapped transport.
 
@@ -62,11 +68,7 @@ class ActivityMonitoringTransport implements Transport:
 
   constructor.private_ .wrapped_transport_:
 
-  counter := 0
   write bytes/ByteArray -> int:
-    if counter++ % 5 == 0:
-      print "oops"
-      throw "oops"
     try:
       is_writing = true
       writing_since_us = Time.monotonic_us
@@ -94,3 +96,6 @@ class ActivityMonitoringTransport implements Transport:
 
   reconnect -> none:
     wrapped_transport_.reconnect
+
+  is_closed -> bool:
+    return wrapped_transport_.is_closed

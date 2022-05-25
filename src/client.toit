@@ -308,13 +308,9 @@ class DefaultCleanSessionReconnectionStrategy extends DefaultReconnectionStrateg
     return false
 
 class DefaultSessionReconnectionStrategy extends DefaultReconnectionStrategyBase:
-  session_reset_callback_ /Lambda?
-
   constructor
       --receive_connect_timeout /Duration = DefaultReconnectionStrategyBase.DEFAULT_RECEIVE_CONNECT_TIMEOUT
-      --attempt_delays /List /*Duration*/ = DefaultReconnectionStrategyBase.DEFAULT_ATTEMPT_DELAYS
-      --on_session_reset /Lambda? = null:
-    session_reset_callback_ = on_session_reset
+      --attempt_delays /List /*Duration*/ = DefaultReconnectionStrategyBase.DEFAULT_ATTEMPT_DELAYS:
     super --receive_connect_timeout=receive_connect_timeout --attempt_delays=attempt_delays
 
   connect -> none
@@ -332,11 +328,9 @@ class DefaultSessionReconnectionStrategy extends DefaultReconnectionStrategyBase
     if is_initial_connection or session_exists: return
 
     // The session was reset.
-    if session_reset_callback_:
-      session_reset_callback_.call
-    else:
-      disconnect.call
-      throw "SESSION_EXPIRED"
+    // Disconnect and throw. If the user wants to, they should create a new client.
+    catch: disconnect.call
+    throw "SESSION_EXPIRED"
 
   should_try_reconnect transport/ActivityMonitoringTransport -> bool:
     return transport.supports_reconnect
@@ -349,16 +343,100 @@ class DefaultSessionReconnectionStrategy extends DefaultReconnectionStrategyBase
 
 class Session_:
   next_packet_id_ /int? := 1
-  pending_ /Map ::= {:}  // int -> Packet.
+  pending_ /Map ::= {:}  // From packet_id to persistent_id.
 
-  set_pending_ack packet/Packet --packet_id/int:
-    pending_[packet_id] = packet
+  set_pending_ack --packet_id/int --persistent_id/int:
+    pending_[packet_id] = persistent_id
 
-  handle_ack id/int [--if_absent]:
+  handle_ack id/int [--if_absent] -> int?:
+    result := pending_.get id
     pending_.remove id --if_absent=if_absent
+    return result
+
+  remove_pending id/int -> none:
+    pending_.remove id
 
   next_packet_id -> int:
     return next_packet_id_++
+
+  /**
+  Runs over the pending packets.
+
+  It is not allowed to change the pending map while calling this method.
+
+  Calls the $block with the packet_id and persistent_id of each pending packet.
+  */
+  do --pending/bool [block] -> none:
+    pending_.do block
+
+/**
+A persistence strategy for the MQTT client.
+
+Note that the client does not automatically resend old messages when it starts up.
+This is also true if the client tries to connect reusing an existing session, but
+  the session has expired. In these cases, the user must manually resend the old
+  messages.
+*/
+interface PersistenceStore:
+  store topic/string payload/ByteArray --retain/bool -> int
+
+  /**
+  Finds the persistent packet with $packet_id and calls the given $block.
+
+  The store may decide not to resend a packet, in which case it calls
+    $if_absent with the $packet_id.
+  */
+  get packet_id/int [block] [--if_absent] -> none
+  remove packet_id/int -> none
+  /**
+  Calls the given block for each stored packet.
+
+  The arguments to the block are:
+  - the persistent id
+  - the topic
+  - the payload
+  - the retain flag
+  */
+  do [block] -> none
+
+class PersistentPacket_:
+  topic /string
+  payload /ByteArray
+  retain /bool
+
+  constructor .topic .payload --.retain:
+
+class MemoryPersistenceStore implements PersistenceStore:
+  storage_ /Map := {:}
+  id_ /int := 0
+
+  store topic/string payload/ByteArray --retain/bool -> int:
+    id := id_++
+    storage_[id] = PersistentPacket_ topic payload --retain=retain
+    return id
+
+  get packet_id/int [block] [--if_absent] -> none:
+    stored := storage_.get packet_id
+    if stored:
+      block.call stored.topic stored.payload stored.retain
+    else:
+      if_absent.call packet_id
+
+  remove packet_id/int -> none:
+    storage_.remove packet_id
+
+  /**
+  Calls the given block for each stored packet.
+
+  The arguments to the block are:
+  - the persistent id
+  - the topic
+  - the payload
+  - the retain flag
+  */
+  do [block] -> none:
+    storage_.do: | id/int packet/PersistentPacket_ |
+      block.call id packet.topic packet.payload packet.retain
 
 /**
 An MQTT client.
@@ -429,7 +507,20 @@ class Client:
   */
   sending_ /monitor.Mutex := monitor.Mutex
 
-  reconnection_strategy_ /ReconnectionStrategy? := null
+  reconnection_strategy_ /ReconnectionStrategy
+
+  /**
+  The persistence store used by this client.
+
+  All messages with qos=1 are stored in this store immediately after they have
+    been sent. Once the client receives an 'ack' they are removed from it.
+
+  If the client closes, but the store isn't empty, then some messages might not
+    have reached the broker.
+
+  Use $PersistenceStore.do to iterate over the stored messages.
+  */
+  persistence_store /PersistenceStore
 
   /**
   Constructs an MQTT client.
@@ -440,10 +531,19 @@ class Client:
   constructor
       --options   /SessionOptions
       --transport /Transport
-      --logger    /log.Logger?:
+      --logger    /log.Logger?
+      --persistence_store /PersistenceStore? = null
+      --reconnection_strategy /ReconnectionStrategy? = null:
     options_ = options
     transport_ = ActivityMonitoringTransport.private_(transport)
     logger_ = logger
+    this.persistence_store = persistence_store or MemoryPersistenceStore
+    if reconnection_strategy:
+      reconnection_strategy_ = reconnection_strategy
+    else if options.clean_session:
+      reconnection_strategy_ = DefaultCleanSessionReconnectionStrategy
+    else:
+      reconnection_strategy_ = DefaultSessionReconnectionStrategy
 
   /**
   Checks whether a user is allowed to send a message.
@@ -455,12 +555,7 @@ class Client:
     // The client is only active once $start has been called.
     if not is_running: throw "INVALID_STATE"
 
-  connect -> none
-      --reconnection_strategy /ReconnectionStrategy =
-          (options_.clean_session
-            ? DefaultCleanSessionReconnectionStrategy
-            : DefaultSessionReconnectionStrategy):
-    reconnection_strategy_ = reconnection_strategy
+  connect -> none:
 
     if state_ != STATE_CREATED_: throw "INVALID_STATE"
     assert: not connection_
@@ -500,9 +595,12 @@ class Client:
         else if packet is PacketIDAck:
           ack := packet as PacketIDAck
           id := ack.packet_id
-          // TODO(florian): implement persistence layer.
-          session_.handle_ack id
+          // The persistence store is allowed to toss out packets it doesn't want to
+          // send again. If we receive an unmatched packet id, it might be from an
+          // earlier attempt to send it.
+          persistence_id := session_.handle_ack id
               --if_absent=: logger_.info "unmatched packet id: $id"
+          if persistence_id: persistence_store.remove persistence_id
         else:
           if logger_: logger_.info "unexpected packet of type $packet.type"
     finally:
@@ -571,13 +669,12 @@ class Client:
   close_force_ -> none:
     assert: state_ == STATE_HANDLING_
     // Since we are in a handling state, there must have been a $connect call, and as such
-    // a reconnection_strategy_
+    // a reconnection_strategy
     assert: reconnection_strategy_
 
     state_ = STATE_CLOSING_
 
-    if reconnection_strategy_:
-      reconnection_strategy_.close
+    reconnection_strategy_.close
 
     // Shut down the connection, which will lead to the $handle method returning
     //   which will then tear down the client.
@@ -628,35 +725,52 @@ class Client:
         --retain=retain
         --packet_id=packet_id
 
-    send_ packet --packet_id=(qos > 0 ? packet_id : null)
+    send_ packet
+    if qos == 1:
+      persistent_id := persistence_store.store topic payload --retain=retain
+      session_.set_pending_ack --packet_id=packet_id --persistent_id=persistent_id
 
   /**
   Subscribes to the given $filter with a max qos of $max_qos.
+
+  Returns the packet id of the subscribe packet.
   */
-  subscribe filter/string --max_qos/int=1 -> none:
-    subscribe_all [ TopicFilter filter --max_qos=max_qos ]
+  subscribe filter/string --max_qos/int=1 -> int:
+    return subscribe_all [ TopicFilter filter --max_qos=max_qos ]
 
   /**
   Subscribes to the given list $topic_filters of type $TopicFilter.
+
+  Returns the packet id of the subscribe packet or -1 if the $topic_filters is empty.
   */
-  subscribe_all topic_filters/List -> none:
-    if topic_filters.is_empty: return
+  subscribe_all topic_filters/List -> int:
+    if topic_filters.is_empty: return -1
 
     packet_id := session_.next_packet_id
     packet := SubscribePacket topic_filters --packet_id=packet_id
-    send_ packet --packet_id=packet_id
+    send_ packet
+    return packet_id
 
-  /** Unsubscribes from a single topic $filter. */
-  unsubscribe filter/string -> none:
-    unsubscribe_all [filter]
+  /**
+  Unsubscribes from a single topic $filter.
 
-  /** Unsubscribes from the list of topic $filters (of type $string). */
-  unsubscribe_all filters/List -> none:
-    if filters.is_empty: return
+  Returns the packet id of the unsubscribe packet.
+  */
+  unsubscribe filter/string -> int:
+    return unsubscribe_all [filter]
+
+  /**
+  Unsubscribes from the list of topic $filters (of type $string).
+
+  Returns the packet id of the unsubscribe packet or -1 if the $filters is empty.
+  */
+  unsubscribe_all filters/List -> int:
+    if filters.is_empty: return -1
 
     packet_id := session_.next_packet_id
     packet := UnsubscribePacket filters --packet_id=packet_id
-    send_ packet --packet_id=packet_id
+    send_ packet
+    return packet_id
 
   /**
   Acknowledges the hand-over of the packet.
@@ -679,14 +793,13 @@ class Client:
         // This way ack-packets are transmitted faster.
         do_connected_: connection_.write ack
 
-  send_ packet/Packet --packet_id/int? -> none:
+  send_ packet/Packet -> none:
     if packet is ConnectPacket: throw "INVALID_PACKET"
     check_allowed_to_send_
     sending_.do:
       // While waiting in the queue the client could have been closed.
       if is_closed: throw CLIENT_CLOSED_EXCEPTION
       do_connected_: connection_.write packet
-      if packet_id: session_.set_pending_ack packet --packet_id=packet_id
 
   do_connected_ [block]:
     if is_closed: throw CLIENT_CLOSED_EXCEPTION
@@ -755,21 +868,28 @@ class Client:
               ack.session_present
             --disconnect = :
               connection_.write DisconnectPacket
-
-        // TODO(florian): resend pending messages if we have the old session.
-        // Send them as dupes.
-
-        // Make sure the connection sends pings so the broker doesn't drop us.
-        connection_.keep_alive --background
-
       finally: | is_exception _ |
         if is_exception:
           close --force
+
+      // If we are here, then the reconnection succeeded.
+
+      // Make sure the connection sends pings so the broker doesn't drop us.
+      connection_.keep_alive --background
+
+      // Resend the pending messages.
+      session_.do --pending: | packet_id/int persistent_id/int |
+        // The persistence store is allowed to decide not to resend packets.
+        persistence_store.get persistent_id
+          --if_absent=: session_.remove_pending packet_id
+          : | topic/string payload/ByteArray retain/bool |
+            packet := PublishPacket topic payload --packet_id=packet_id --qos=1 --retain=retain --duplicate
+            connection_.write packet
 
   /** Tears down the client. */
   tear_down_:
     critical_do:
       state_ = STATE_CLOSED_
-      if reconnection_strategy_: reconnection_strategy_.close
+      reconnection_strategy_.close
       connection_.close
 

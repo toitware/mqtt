@@ -145,13 +145,17 @@ class ConnAckPacket extends Packet:
 class PublishPacket extends Packet:
   static TYPE ::= 3
 
-  topic/string
-  payload/ByteArray
-  qos/int
-  packet_id/int?
+  topic /string
+  payload /ByteArray
+  qos /int
+  packet_id /int?
+  duplicate /bool
+  retain /bool
 
   constructor.deserialize reader/reader.BufferedReader size/int flags/int:
+    retain = flags & 0b1 != 0
     qos = (flags >> 1) & 0b11
+    duplicate = flags & 0b1000 != 0
     data := reader.read_bytes 2
     topic_length := binary.BIG_ENDIAN.uint16 data 0
     topic = reader.read_string topic_length
@@ -165,9 +169,9 @@ class PublishPacket extends Packet:
     payload = reader.read_bytes size
     super TYPE
 
-  constructor .topic .payload --.qos/int --retain --.packet_id:
+  constructor .topic .payload --.qos/int --.retain --.packet_id --.duplicate=false:
     super TYPE
-      --flags=(qos << 1) | (retain ? 1 : 0)
+      --flags=(qos << 1) | (retain ? 1 : 0) | (duplicate ? 0b100 : 0)
 
   variable_header -> ByteArray:
     buffer := bytes.Buffer

@@ -18,8 +18,10 @@ A transport for backing an MQTT client with TCP or TLS/TCP.
 Supports reconnecting to the same server if constructed with the connection information.
 */
 abstract class TcpTransport implements Transport:
+  socket_ /tcp.Socket? := null
+
   constructor socket/tcp.Socket:
-    return SocketTransport_ socket
+    socket_ = socket
 
   constructor interface/tcp.Interface --host/string --port/int=1883:
     return ReconnectingTransport_ interface --host=host --port=port
@@ -33,24 +35,7 @@ abstract class TcpTransport implements Transport:
       --server_name=server_name
       --certificate=certificate
 
-  constructor.from_subclass_:
-
-  abstract write bytes/ByteArray -> int
-  abstract read -> ByteArray?
-  abstract close -> none
-  abstract supports_reconnect -> bool
-  abstract reconnect -> none
-
-class SocketTransport_ extends TcpTransport:
-  socket_ /tcp.Socket
-
-  transport_ /TcpTransport? := null
-  reconnecting_mutex /monitor.Mutex? := null
-
-  constructor .socket_:
-    // Send messages immediately.
-    socket_.set_no_delay true
-    super.from_subclass_
+  constructor.from_subclass_ .socket_:
 
   write bytes/ByteArray -> int:
     return socket_.write bytes
@@ -58,8 +43,12 @@ class SocketTransport_ extends TcpTransport:
   read -> ByteArray?:
     return socket_.read
 
-  close -> none:
-    socket_.close
+  close:
+    if socket_: socket_.close
+    socket_ = null
+
+  is_closed -> bool:
+    return socket_ == null
 
   supports_reconnect -> bool:
     return false
@@ -73,15 +62,12 @@ class ReconnectingTransport_ extends TcpTransport:
   host_      /string
   port_      /int
 
-  // The current connection.
-  socket_ /tcp.Socket? := null
-
   reconnecting_mutex /monitor.Mutex := monitor.Mutex
 
   constructor .interface_ --host/string --port/int=1883:
     host_ = host
     port_ = port
-    super.from_subclass_
+    super.from_subclass_ null
     reconnect
 
   write bytes/ByteArray -> int:
@@ -91,7 +77,6 @@ class ReconnectingTransport_ extends TcpTransport:
     return socket_.read
 
   reconnect:
-    // TODO(florian): implement retries and exponential back-off.
     old_socket := socket_
     reconnecting_mutex = monitor.Mutex
     reconnecting_mutex.do:
@@ -108,10 +93,6 @@ class ReconnectingTransport_ extends TcpTransport:
 
   new_connection_ -> tcp.Socket:
     return interface_.tcp_connect host_ port_
-
-  close:
-    if socket_: socket_.close
-    socket_ = null
 
   supports_reconnect -> bool:
     return true
