@@ -77,16 +77,17 @@ class SubscriptionTree_:
   find topic/string -> CallbackEntry_?:
     if topic == "": throw "INVALID_ARGUMENT"
     topic_levels := topic.split "/"
-    node /SubscriptionTreeNode_ := root
+    node /SubscriptionTreeNode_? := root
     catch_all_callback /CallbackEntry_? := null
     topic_levels.do: | topic_level |
       catch_all_node := node.children.get "#"
       if catch_all_node: catch_all_callback = catch_all_node.callback_entry_
 
-      node = node.children.get topic_level
-      if not node: node = node.children.get "+"
-      if not node and not catch_all_callback: return null
-      if not node: return catch_all_callback
+      new_node := node.children.get topic_level
+      if not new_node: new_node = node.children.get "+"
+      if not new_node and not catch_all_callback: return null
+      if not new_node: return catch_all_callback
+      node = new_node
     if node.callback_entry_: return node.callback_entry_
     return catch_all_callback
 
@@ -102,24 +103,29 @@ class Router:
   The $transport parameter is used to send messages and is usually a TCP socket instance.
     See $TcpTransport.
   */
+  // TODO(florian): we must be able to set callback handlers before we start the client.
+  // Otherwise we will have "Received packet for unregister topics.".
   constructor
-      --session_options /SessionOptions
       --transport /Transport
       --logger /log.Logger? = log.default:
     logger_ = logger
-    client_ = Client --options=session_options --transport=transport --logger=logger
+    client_ = Client --transport=transport --logger=logger
 
-  start --attached/bool:
+  start --attached/bool --session_options /SessionOptions:
     if not attached: throw "INVALID_ARGUMENT"
-    client_.connect
-    client_.handle --on_packet=(:: handle_packet_ it)
+    client_.connect --options=session_options
+    client_.handle: handle_packet_ it
 
-  start --detached/bool --background/bool=false --on_error/Lambda=(:: throw it) -> none:
+  start -> none
+      --detached/bool
+      --session_options /SessionOptions
+      --background/bool=false
+      --on_error/Lambda=(:: throw it):
     if not detached: throw "INVALID_ARGUMENT"
-    client_.connect
+    client_.connect --options=session_options
     task --background=background::
       exception := catch --trace:
-        client_.handle --on_packet=(:: handle_packet_ it)
+        client_.handle: handle_packet_ it
       if exception: on_error.call exception
     client_.when_running: return
 
@@ -140,13 +146,13 @@ class Router:
       else:
         // This can happen when the user unsubscribed from this topic but the
         // packet was already in the incoming queue.
-        logger_.info "Received packet for unregistered topic $topic"
+        logger_.info "received packet for unregistered topic $topic"
       return
 
     if packet is SubAckPacket:
       suback := packet as SubAckPacket
       if (suback.qos.any: it == SubAckPacket.FAILED_SUBSCRIPTION_QOS):
-        logger_.error "At least one subscription failed"
+        logger_.error "at least one subscription failed"
 
     // Ignore all other packets.
 
@@ -192,6 +198,8 @@ class Router:
   */
   unsubscribe filter/string -> none:
     client_.unsubscribe filter
+    // TODO(florian): wait for the ack and then remove the callback from the tree.
+    // Or maybe remove the callback immediately.
 
   /**
   Unsubscribes from all $filters in the given list.

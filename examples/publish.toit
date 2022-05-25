@@ -11,13 +11,10 @@ main:
   // socket := net.open.tcp_connect "127.0.0.1" 1883
   // transport := mqtt.TcpTransport socket
 
+  client := mqtt.Router --transport=transport
   options := mqtt.SessionOptions --client_id="toit-publish"
+  client.start --detached --session_options=options
 
-  client := mqtt.Router
-    --session_options = options
-    --transport = transport
-
-  client.start --detached
   print "connected to broker"
 
   4.repeat:

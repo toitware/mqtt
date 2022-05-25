@@ -28,6 +28,8 @@ class SessionOptions:
     The client automatically sends PINGREQ messages when necessary. If the value is
     lower, then the server detects disconnects faster, but the client needs to send
     more messages.
+  If $keep_alive is set to 0, the broker does not disconnect due to inactivity, and
+    the client won't send any ping requests.
 
   When provided, the $last_will configuration is used to send when the client
     disconnects ungracefully.

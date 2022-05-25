@@ -38,3 +38,5 @@ Tests:
 - transport block at first write (throw in 'write' of transport.)
 
 - connect, then publish but don't call handle.
+
+- test with keep-alive 0. (No activity checks.)

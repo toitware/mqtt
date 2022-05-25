@@ -115,6 +115,8 @@ class Connection_:
   keep_alive --background/bool:
     assert: background
     if activity_task_: throw "ALREADY_RUNNING"
+    if keep_alive_duration_ == (Duration --s=0): return
+
     activity_task_ = task --background::
       try:
         checker := ActivityChecker_ this --keep_alive=keep_alive_duration_
@@ -341,9 +343,14 @@ class DefaultSessionReconnectionStrategy extends DefaultReconnectionStrategyBase
   close -> none:
     is_closed_ = true
 
+/** An MQTT session. */
 class Session_:
   next_packet_id_ /int? := 1
   pending_ /Map ::= {:}  // From packet_id to persistent_id.
+
+  options /SessionOptions
+
+  constructor .options:
 
   set_pending_ack --packet_id/int --persistent_id/int:
     pending_[packet_id] = persistent_id
@@ -481,11 +488,11 @@ class Client:
 
   state_ /int := STATE_CREATED_
 
-  options_ /SessionOptions
   transport_ /ActivityMonitoringTransport := ?
   logger_ /log.Logger?
 
   session_ /Session_? := null
+  reconnection_strategy_ /ReconnectionStrategy? := null
 
   connection_ /Connection_? := null
   connecting_ /monitor.Mutex := monitor.Mutex
@@ -507,8 +514,6 @@ class Client:
   */
   sending_ /monitor.Mutex := monitor.Mutex
 
-  reconnection_strategy_ /ReconnectionStrategy
-
   /**
   The persistence store used by this client.
 
@@ -529,21 +534,12 @@ class Client:
     the connection.
   */
   constructor
-      --options   /SessionOptions
       --transport /Transport
-      --logger    /log.Logger?
-      --persistence_store /PersistenceStore? = null
-      --reconnection_strategy /ReconnectionStrategy? = null:
-    options_ = options
+      --logger /log.Logger?
+      --persistence_store /PersistenceStore? = null:
     transport_ = ActivityMonitoringTransport.private_(transport)
     logger_ = logger
     this.persistence_store = persistence_store or MemoryPersistenceStore
-    if reconnection_strategy:
-      reconnection_strategy_ = reconnection_strategy
-    else if options.clean_session:
-      reconnection_strategy_ = DefaultCleanSessionReconnectionStrategy
-    else:
-      reconnection_strategy_ = DefaultSessionReconnectionStrategy
 
   /**
   Checks whether a user is allowed to send a message.
@@ -555,18 +551,26 @@ class Client:
     // The client is only active once $start has been called.
     if not is_running: throw "INVALID_STATE"
 
-  connect -> none:
-
+  connect -> none
+      --options /SessionOptions
+      --reconnection_strategy /ReconnectionStrategy? = null:
     if state_ != STATE_CREATED_: throw "INVALID_STATE"
     assert: not connection_
 
-    session_ = Session_
+    if reconnection_strategy:
+      reconnection_strategy_ = reconnection_strategy
+    else if options.clean_session:
+      reconnection_strategy_ = DefaultCleanSessionReconnectionStrategy
+    else:
+      reconnection_strategy_ = DefaultSessionReconnectionStrategy
+
+    session_ = Session_ options
 
     state_ = STATE_CONNECTING_
     reconnect_ --is_initial_connection
     state_ = STATE_CONNECTED_
 
-  handle --on_packet/Lambda -> none:
+  handle [on_packet] -> none:
     if state_ != STATE_CONNECTED_: throw "INVALID_STATE"
     state_ = STATE_HANDLING_
 
@@ -586,14 +590,14 @@ class Client:
           // Gracefully shut down.
           break
 
-        if packet is PublishPacket:
+        if packet is PublishPacket or packet is SubAckPacket or packet is UnsubAckPacket:
           on_packet.call packet
         else if packet is ConnAckPacket:
           if logger_: logger_.info "spurious conn-ack packet"
         else if packet is PingRespPacket:
           // Ignore.
-        else if packet is PacketIDAck:
-          ack := packet as PacketIDAck
+        else if packet is PubAckPacket:
+          ack := packet as PubAckPacket
           id := ack.packet_id
           // The persistence store is allowed to toss out packets it doesn't want to
           // send again. If we receive an unmatched packet id, it might be from an
@@ -670,7 +674,7 @@ class Client:
     assert: state_ == STATE_HANDLING_
     // Since we are in a handling state, there must have been a $connect call, and as such
     // a reconnection_strategy
-    assert: reconnection_strategy_
+    assert: session_
 
     state_ = STATE_CLOSING_
 
@@ -835,11 +839,16 @@ class Client:
 
   refused_reason_for_return_code_ return_code/int -> string:
     refused_reason := "CONNECTION_REFUSED"
-    if return_code == 1: refused_reason = "UNACCEPTABLE_PROTOCOL_VERSION"
-    else if return_code == 2: refused_reason = "IDENTIFIER_REJECTED"
-    else if return_code == 3: refused_reason = "SERVER_UNAVAILABLE"
-    else if return_code == 4: refused_reason = "BAD_USERNAME_OR_PASSWORD"
-    else if return_code == 5: refused_reason = "NOT_AUTHORIZED"
+    if return_code == ConnAckPacket.UNACCEPTABLE_PROTOCOL_VERSION:
+      refused_reason = "UNACCEPTABLE_PROTOCOL_VERSION"
+    else if return_code == ConnAckPacket.IDENTIFIER_REJECTED:
+      refused_reason = "IDENTIFIER_REJECTED"
+    else if return_code == ConnAckPacket.SERVER_UNAVAILABLE:
+      refused_reason = "SERVER_UNAVAILABLE"
+    else if return_code == ConnAckPacket.BAD_USERNAME_OR_PASSWORD:
+      refused_reason = "BAD_USERNAME_OR_PASSWORD"
+    else if return_code == ConnAckPacket.NOT_AUTHORIZED:
+      refused_reason = "NOT_AUTHORIZED"
     return refused_reason
 
   reconnect_ --is_initial_connection/bool -> none:
@@ -852,21 +861,21 @@ class Client:
 
       if not connection_:
         assert: is_initial_connection
-        connection_ = Connection_ transport_ --keep_alive=options_.keep_alive
+        connection_ = Connection_ transport_ --keep_alive=session_.options.keep_alive
 
       try:
         reconnection_strategy_.connect transport_
             --is_initial_connection = is_initial_connection
             --reconnect_transport = :
               transport_.reconnect
-              connection_ = Connection_ transport_ --keep_alive=options_.keep_alive
+              connection_ = Connection_ transport_ --keep_alive=session_.options.keep_alive
             --send_connect = :
-              packet := ConnectPacket options_.client_id
-                  --clean_session=options_.clean_session
-                  --username=options_.username
-                  --password=options_.password
-                  --keep_alive=options_.keep_alive
-                  --last_will=options_.last_will
+              packet := ConnectPacket session_.options.client_id
+                  --clean_session=session_.options.clean_session
+                  --username=session_.options.username
+                  --password=session_.options.password
+                  --keep_alive=session_.options.keep_alive
+                  --last_will=session_.options.last_will
               connection_.write packet
             --receive_connect_ack = :
               response := connection_.read
@@ -905,6 +914,6 @@ class Client:
   tear_down_:
     critical_do:
       state_ = STATE_CLOSED_
-      reconnection_strategy_.close
+      if reconnection_strategy_: reconnection_strategy_.close
       connection_.close
 
