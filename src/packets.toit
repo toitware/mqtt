@@ -215,7 +215,7 @@ class PublishPacket extends Packet:
     payload = reader.read_bytes size
     super TYPE --flags=(qos << 1) | (retain ? 1 : 0) | (duplicate ? 0b1000 : 0)
 
-  constructor .topic .payload --qos/int --retain --.packet_id --duplicate=false:
+  constructor .topic .payload --qos/int --retain/bool --.packet_id --duplicate=false:
     super TYPE
         --flags=(qos << 1) | (retain ? 1 : 0) | (duplicate ? 0b1000 : 0)
 
@@ -228,6 +228,15 @@ class PublishPacket extends Packet:
   retain -> bool: return flags & 0b1 != 0
   qos -> int: return (flags >> 1) & 0b11
   duplicate -> bool: return flags & 0b1000 != 0
+
+  with --topic/string?=null --payload/ByteArray?=null --qos/int?=null --retain/bool?=null --packet_id/int?=null --duplicate/bool?=null:
+    return PublishPacket
+        topic or this.topic
+        payload or this.payload
+        --qos = qos or this.qos
+        --retain = retain != null ? retain : this.retain
+        --packet_id = packet_id or this.packet_id
+        --duplicate = duplicate != null ? duplicate : this.duplicate
 
 class PubAckPacket extends Packet:
   static TYPE ::= 4

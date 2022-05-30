@@ -40,3 +40,17 @@ Tests:
 - connect, then publish but don't call handle.
 
 - test with keep-alive 0. (No activity checks.)
+
+- test that retain flag is set when receiving a retained message.
+
+- test invalid topics. (Mosquitto disconnects due to "malformed packet")
+
+- test invalid topic in publish (+, #)
+
+- test topic-filter max_qos
+
+- retained with qos=1
+
+- close client from within a handle.
+
+- empty topic publish throws

@@ -1,0 +1,12 @@
+Name: ephemeral-port-reserve
+Short Name: ephemeral-port-reserve
+URL: https://github.com/Yelp/ephemeral-port-reserve
+Version: 1.1.4
+Revision: 6cf5addc2f1d5c0a25be4ba4af62104da1d8fc51
+Date: 2022-05-30
+Author: Yelp
+License: MIT
+
+Description:
+Reserves a port by forcing the port into a TIME_WAIT state which
+  gives subprocesses 60 seconds time to use the port.

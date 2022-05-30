@@ -5,7 +5,7 @@
 import mqtt
 import net
 
-TOPIC ::= "toit/example/publish_subscribe"
+TOPIC ::= "toit/example/#"
 main:
   transport := mqtt.TcpTransport net.open --host="127.0.0.1"
   // socket := net.open.tcp_connect "127.0.0.1" 1883

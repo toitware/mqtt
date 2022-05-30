@@ -10,6 +10,7 @@ import .packets
 import .tcp // For toitdoc.
 import .topic_filter
 import .transport
+import .topic_tree_
 
 class CallbackEntry_:
   callback /Lambda
@@ -18,83 +19,10 @@ class CallbackEntry_:
 
   constructor .callback .max_qos:
 
-class SubscriptionTreeNode_:
-  topic_level /string
-  callback_entry_ /CallbackEntry_? := null
-  children /Map ::= {:}  // string -> SubscriptionTreeNode_?
-
-  constructor .topic_level:
-
-/**
-A tree of subscription, matching a topic to the registered callback.
-*/
-class SubscriptionTree_:
-  root /SubscriptionTreeNode_ := SubscriptionTreeNode_ "ignored_root"
-
-  /**
-  Inserts, or replaces the callback for the given topic.
-
-  Returns the old callback entry. Null if there was none.
-  */
-  add topic/string callback_entry/CallbackEntry_ -> CallbackEntry_?:
-    if topic == "": throw "INVALID_ARGUMENT"
-    topic_levels := topic.split "/"
-    node /SubscriptionTreeNode_ := root
-    topic_levels.do: | topic_level |
-      node = node.children.get topic_level --init=: SubscriptionTreeNode_ topic_level
-    result := node.callback_entry_
-    node.callback_entry_ = callback_entry
-    return result
-
-  /**
-  Removes the callback for the given topic.
-
-  Returns the old callback entry. Null if there was none.
-  */
-  remove topic/string -> CallbackEntry_?:
-    if topic == "": throw "INVALID_ARGUMENT"
-    topic_levels := topic.split "/"
-    node /SubscriptionTreeNode_? := root
-    // Keep track of the parent node where we can (maybe) remove the child node from.
-    // Any parent that has more than one child or has a callback must stay.
-    parent_to_remove_from /SubscriptionTreeNode_? := root
-    topic_level_to_remove /string? := null
-    topic_levels.do: | topic_level |
-      if node.callback_entry_ or node.children.size > 1:
-        parent_to_remove_from = node
-        topic_level_to_remove = topic_level
-
-      node = node.children.get topic_level --if_absent=: throw "NOT SUBSCRIBED TO $topic"
-
-    result := node.callback_entry_
-    if node.children.is_empty:
-      parent_to_remove_from.children.remove topic_level_to_remove
-    else:
-      node.callback_entry_ = null
-
-    return result
-
-  find topic/string -> CallbackEntry_?:
-    if topic == "": throw "INVALID_ARGUMENT"
-    topic_levels := topic.split "/"
-    node /SubscriptionTreeNode_? := root
-    catch_all_callback /CallbackEntry_? := null
-    topic_levels.do: | topic_level |
-      catch_all_node := node.children.get "#"
-      if catch_all_node: catch_all_callback = catch_all_node.callback_entry_
-
-      new_node := node.children.get topic_level
-      if not new_node: new_node = node.children.get "+"
-      if not new_node and not catch_all_callback: return null
-      if not new_node: return catch_all_callback
-      node = new_node
-    if node.callback_entry_: return node.callback_entry_
-    return catch_all_callback
-
 class Router:
   client_ /Client
 
-  subscription_callbacks_ /SubscriptionTree_ := SubscriptionTree_
+  subscription_callbacks_ /TopicTree := TopicTree
   logger_ /log.Logger?
 
   /**
@@ -140,10 +68,11 @@ class Router:
       publish := packet as PublishPacket
       topic := publish.topic
       payload := publish.payload
-      callback := subscription_callbacks_.find topic
-      if callback:
-        callback.callback.call topic payload
-      else:
+      was_executed := false
+      subscription_callbacks_.do --most_specialized topic: | callback_entry |
+        callback_entry.callback.call topic payload
+        was_executed = true
+      if not was_executed:
         // This can happen when the user unsubscribed from this topic but the
         // packet was already in the incoming queue.
         logger_.info "received packet for unregistered topic $topic"
@@ -182,7 +111,7 @@ class Router:
     if topic_filters.is_empty: throw "INVALID_ARGUMENT"
 
     callback_entry := CallbackEntry_ callback max_qos
-    old_entry := subscription_callbacks_.add filter callback_entry
+    old_entry := subscription_callbacks_.set filter callback_entry
     if old_entry:
       old_entry.is_subscribed = false
       if old_entry.max_qos == max_qos:
@@ -197,6 +126,7 @@ class Router:
   The client must be connected to the $filter.
   */
   unsubscribe filter/string -> none:
+    throw "UNIMPLEMENTED"
     client_.unsubscribe filter
     // TODO(florian): wait for the ack and then remove the callback from the tree.
     // Or maybe remove the callback immediately.
@@ -205,6 +135,7 @@ class Router:
   Unsubscribes from all $filters in the given list.
   */
   unsubscribe_all filters/List -> none:
+    throw "UNIMPLEMENTED"
     client_.unsubscribe_all filters
 
   close -> none:

@@ -528,6 +528,14 @@ class Client:
   persistence_store /PersistenceStore
 
   /**
+  Keeps track of the last acked packet.
+
+  If the packet was not acked during the callback of $handle we will do so automatically
+    when the callback returns.
+  */
+  unacked_packet_ /Packet? := null
+
+  /**
   Constructs an MQTT client.
 
   The client starts disconnected. Call $connect, followed by $handle to initiate
@@ -548,7 +556,7 @@ class Client:
   */
   check_allowed_to_send_:
     if is_closed: throw CLIENT_CLOSED_EXCEPTION
-    // The client is only active once $start has been called.
+    // The client is only active once $handle has been called.
     if not is_running: throw "INVALID_STATE"
 
   connect -> none
@@ -570,6 +578,15 @@ class Client:
     reconnect_ --is_initial_connection
     state_ = STATE_CONNECTED_
 
+  /**
+  Runs the receiving end of the client.
+
+  The client is not considered started until this method has been called.
+  This method is blocking.
+
+  The given $on_packet block is called for each received packet.
+    The block should $ack the packet as soon as possible.
+  */
   handle [on_packet] -> none:
     if state_ != STATE_CONNECTED_: throw "INVALID_STATE"
     state_ = STATE_HANDLING_
@@ -591,7 +608,12 @@ class Client:
           break
 
         if packet is PublishPacket or packet is SubAckPacket or packet is UnsubAckPacket:
-          on_packet.call packet
+          unacked_packet_ = packet
+          try:
+            on_packet.call packet
+            if is_running and unacked_packet_: ack unacked_packet_
+          finally:
+            unacked_packet_ = null
         else if packet is ConnAckPacket:
           if logger_: logger_.info "spurious conn-ack packet"
         else if packet is PingRespPacket:
@@ -610,8 +632,15 @@ class Client:
     finally:
       tear_down_
 
+  /**
+  Calls the given $block when the client is running.
+  If the client was not able to connect, then the block is not called.
+  */
   when_running [block] -> none:
-    handling_latch_.get
+    if is_closed: return
+    is_running := handling_latch_.get
+    if not is_running: return
+    block.call
 
   /**
   Closes the client.
@@ -718,6 +747,7 @@ class Client:
   Not all MQTT brokers support $retain.
   */
   publish topic/string payload/ByteArray --qos/int=1 --retain/bool=false -> none:
+    if topic == "" or topic.contains "+" or topic.contains "#": throw "INVALID_ARGUMENT"
     packet_id := send_publish_ topic payload --qos=qos --retain=retain
     if qos == 1:
       persistent_id := persistence_store.store topic payload --retain=retain
@@ -799,6 +829,8 @@ class Client:
   If the client isn't running, does nothing.
   */
   ack packet/Packet:
+    if unacked_packet_ == packet: unacked_packet_ = null
+
     // Can't ack if we don't have a connection anymore.
     // Don't use $is_closed, as we are allowed to send acks after a $disconnect.
     if state_ == STATE_CLOSING_ or state_ == STATE_CLOSED_: return
@@ -829,7 +861,7 @@ class Client:
         connection_.is_alive or reconnection_strategy_.is_closed or
           not reconnection_strategy_.should_try_reconnect transport_
 
-      exception := catch --unwind=should_abandon --trace:
+      exception := catch --unwind=should_abandon:
         block.call
         return
       assert: exception != null
@@ -916,4 +948,5 @@ class Client:
       state_ = STATE_CLOSED_
       if reconnection_strategy_: reconnection_strategy_.close
       connection_.close
+      if not handling_latch_.has_value: handling_latch_.set false
 

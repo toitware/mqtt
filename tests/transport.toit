@@ -42,7 +42,6 @@ class TestBrokerTransport implements broker.Transport:
   constructor .pipe_:
 
   write bytes/ByteArray -> int:
-    print "broker writes"
     pipe_.broker_write bytes
     return bytes.size
 
@@ -50,6 +49,7 @@ class TestBrokerTransport implements broker.Transport:
     return pipe_.broker_read
 
   close -> none:
+    pipe_.broker_close
 
 
 class TestServerTransport implements broker.ServerTransport:
@@ -80,14 +80,13 @@ monitor TestTransportPipe:
   is_closed := false
 
   client_write bytes/ByteArray -> none:
-    print "client wrote"
     client_to_broker_data_.add bytes
-    print "size: $(client_to_broker_data_.size)"
 
   client_read -> ByteArray?:
     await: broker_to_client_data_.size > 0 or is_closed
     if broker_to_client_data_.is_empty: return null
-    return broker_to_client_data_.remove_first
+    result := broker_to_client_data_.remove_first
+    return result
 
   client_close:
     is_closed = true
@@ -102,8 +101,7 @@ monitor TestTransportPipe:
   broker_read -> ByteArray?:
     await: client_to_broker_data_.size > 0 or is_closed
     if client_to_broker_data_.is_empty: return null
-    result := client_to_broker_data_.remove_first
-    return result
+    return client_to_broker_data_.remove_first
 
   broker_close:
     is_closed = true
