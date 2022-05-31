@@ -167,6 +167,14 @@ test_publish:
       "packet-id": 50_000,
       "duplicate": true,
     },
+    {
+      "topic": "foo/bar/gee",
+      "payload": "bar".to_byte_array,
+      "qos": 0,
+      "retain": false,
+      "packet-id": null,
+      "duplicate": false,
+    },
   ]
 
   TESTS.do: | test |

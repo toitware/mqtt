@@ -7,7 +7,7 @@ A simple transport for testing.
 */
 
 import mqtt.transport as mqtt
-import .broker as broker
+import mqtt.broker as broker
 import monitor
 
 class TestClientTransport implements mqtt.Transport:
@@ -108,3 +108,33 @@ monitor TestTransportPipe:
 
   broker_is_closed -> bool:
     return is_closed
+
+class LoggingTransport implements mqtt.Transport:
+  log := []
+  wrapped_ /mqtt.Transport
+
+  constructor .wrapped_:
+
+  write bytes/ByteArray -> int:
+    // We assume that all bytes are always fully written.
+    log.add [ "write", bytes ]
+    return wrapped_.write bytes
+
+  read -> ByteArray?:
+    result := wrapped_.read
+    log.add [ "read", result ]
+    return result
+
+  close -> none:
+    log.add [ "close" ]
+    wrapped_.close
+
+  supports_reconnect -> bool:
+    return true
+
+  reconnect -> none:
+    log.add [ "reconnect" ]
+    wrapped_.reconnect
+
+  is_closed -> bool:
+    return wrapped_.is_closed

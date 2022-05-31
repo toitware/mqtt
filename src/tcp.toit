@@ -8,6 +8,7 @@ import reader
 import tls
 import monitor
 
+import .broker
 import .transport
 import .packets
 
@@ -17,7 +18,7 @@ A transport for backing an MQTT client with TCP or TLS/TCP.
 
 Supports reconnecting to the same server if constructed with the connection information.
 */
-abstract class TcpTransport implements Transport:
+abstract class TcpTransport implements Transport BrokerTransport:
   socket_ /tcp.Socket? := null
 
   constructor socket/tcp.Socket:

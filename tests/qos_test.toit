@@ -61,7 +61,7 @@ test_pubsub client/mqtt.Client callbacks/Map --logger/log.Logger:
 
 test_multisub client/mqtt.Client callbacks/Map --logger/log.Logger:
   2.repeat: | max_qos |
-    logger.info "Testing multi-subscription with max-qos=$max_qos"
+    logger.info "****** Testing multi-subscription with max-qos=$max_qos"
 
     TOPICS ::= [
       "foo/+/gee",
@@ -86,22 +86,49 @@ test_multisub client/mqtt.Client callbacks/Map --logger/log.Logger:
 
     client.unsubscribe_all TOPICS
 
-test transport/mqtt.Transport --logger/log.Logger:
-  client := mqtt.Client --transport=transport --logger=logger
+deserialize
 
-  options := mqtt.SessionOptions --client_id="test_client"
+test transport/mqtt.Transport --logger/log.Logger:
+  logging_transport := LoggingTransport transport
+  logs := logging_transport.log
+  client := mqtt.Client --transport=logging_transport --logger=logger
+
+  // No keep-alive pings. As they would make the test non-deterministic.
+  options := mqtt.SessionOptions --client_id="test_client" --keep_alive=Duration.ZERO
   client.connect --options=options
 
-  callbacks := {:}
+  // We are going to use a "idle" ping packet to know when the broker is idle.
+  // It's not a guarantee as the broker is allowed to send acks whenever it wants, but
+  // it should be quite stable.
+  idle := monitor.Semaphore
+
+  client.subscribe "idle" --max_qos=0
+
+  wait_for_idle := :
+    client.publish "idle" #[] --qos=0
+    idle.down
+
   task::
     client.handle: | packet/mqtt.Packet |
+      logger.info "Received $(stringify_packet packet)"
       if packet is mqtt.PublishPacket:
         client.ack packet
-        publish := packet as mqtt.PublishPacket
-        callbacks[publish.topic].call publish
-      else:
-        logger.info "Ignored $(stringify_packet packet)"
+        if (packet as mqtt.PublishPacket).topic == "idle": idle.up
+
     logger.info "client shut down"
+
+  wait_for_idle.call
+  logs.clear
+
+  client.publish "foo/bar/gee" "bar".to_byte_array --qos=1
+  wait_for_idle.call
+  expect_equals 4 logging_transport.log.size
+  expect_equals "write" logs[0][0]  // The publish.
+  expect_equals "read" logs[1][0]  // The publish.
+  expect Packet
+
+
+
 
   client.when_running:
     test_pubsub client callbacks --logger=logger

@@ -98,6 +98,61 @@ abstract class Packet:
     length_bytes := reader.read_bytes 2
     return binary.BIG_ENDIAN.uint16 length_bytes 0
 
+  static debug_string_ packet/Packet -> string:
+    if packet is ConnectPacket:
+      connect := packet as ConnectPacket
+      "foo" + "bar"
+      return ("Connect: $connect.client_id"
+              + " $(connect.clean_session ? "clean": "reuse")"
+              + " $(connect.last_will ? "last-will-for-$connect.last_will.topic": "no-last-will")"
+              + " $(connect.username ? "with-username-$connect.username": "no-username")"
+              + " $(connect.password ? "with-password-$connect.password": "no-password")"
+              + " $(connect.keep_alive)")
+    else if packet is PingReqPacket:
+      return "Ping request"
+    else if packet is PingRespPacket:
+      return "Ping response"
+    else if packet is ConnAckPacket:
+      connack := packet as ConnAckPacket
+      return "ConnAck: $connack.return_code $connack.session_present"
+    else if packet is PublishPacket:
+      publish := packet as PublishPacket
+      result := "Publish$(publish.packet_id ? "($publish.packet_id)" : "")"
+          + " topic=$publish.topic"
+          + " qos=$publish.qos"
+          + " $(publish.duplicate ? "dup": "no-dup")"
+          + " $(publish.retain ? "retain": "no-retain")"
+          + " $(publish.payload.size) bytes"
+      if publish.payload.size < 15:
+        result += " \"$(publish.payload.to_string_non_throwing)\""
+      return result
+    else if packet is PubAckPacket:
+      puback := packet as PubAckPacket
+      return "PubAck($puback.packet_id)"
+    else if packet is SubscribePacket:
+      subscribe := packet as SubscribePacket
+      result := "Subscribe($subscribe.packet_id)"
+      subscribe.topic_filters.do:
+        result += " $it.filter-$it.max_qos"
+      return result
+    else if packet is SubAckPacket:
+      suback := packet as SubAckPacket
+      return "SubAck($suback.packet_id)"
+    else if packet is UnsubscribePacket:
+      unsubscribe := packet as UnsubscribePacket
+      result := "Unsubscribe($unsubscribe.packet_id)"
+      unsubscribe.topic_filters.do:
+        result += " $it"
+      return result
+    else if packet is UnsubAckPacket:
+      unsuback := packet as UnsubAckPacket
+      return "UnsubAck($unsuback.packet_id)"
+    else if packet is DisconnectPacket:
+      disconnect := packet as DisconnectPacket
+      return "Disconnect"
+    else:
+      return "Packet of type $packet.type"
+
 class ConnectPacket extends Packet:
   static TYPE ::= 1
 
@@ -229,13 +284,30 @@ class PublishPacket extends Packet:
   qos -> int: return (flags >> 1) & 0b11
   duplicate -> bool: return flags & 0b1000 != 0
 
-  with --topic/string?=null --payload/ByteArray?=null --qos/int?=null --retain/bool?=null --packet_id/int?=null --duplicate/bool?=null:
+  /**
+  Creates a new packet with the provided parameters replacing the current values.
+
+  Optional arguments don't work if one wants to pass in null. As such, the
+    $packet_id must be given as integer. If the packet-id should be null, then '-1' should
+    be used instead.
+  */
+  with -> PublishPacket
+      --topic/string?=null
+      --payload/ByteArray?=null
+      --qos/int?=null
+      --retain/bool?=null
+      --packet_id/int=-2
+      --duplicate/bool?=null:
+    new_packet_id /int? := ?
+    if packet_id == -2: new_packet_id = this.packet_id
+    else if packet_id == -1: new_packet_id = null
+    else: new_packet_id = packet_id
     return PublishPacket
         topic or this.topic
         payload or this.payload
         --qos = qos or this.qos
         --retain = retain != null ? retain : this.retain
-        --packet_id = packet_id or this.packet_id
+        --packet_id = new_packet_id
         --duplicate = duplicate != null ? duplicate : this.duplicate
 
 class PubAckPacket extends Packet:
