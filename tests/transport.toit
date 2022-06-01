@@ -8,7 +8,9 @@ A simple transport for testing.
 
 import mqtt.transport as mqtt
 import mqtt.broker as broker
+import mqtt.packets as mqtt
 import monitor
+import reader
 
 class TestClientTransport implements mqtt.Transport:
   server_ /TestServerTransport
@@ -36,7 +38,7 @@ class TestClientTransport implements mqtt.Transport:
   is_closed -> bool:
     return pipe_.client_is_closed
 
-class TestBrokerTransport implements broker.Transport:
+class TestBrokerTransport implements broker.BrokerTransport:
   pipe_ /TestTransportPipe
 
   constructor .pipe_:
@@ -58,8 +60,8 @@ class TestServerTransport implements broker.ServerTransport:
   is_closed /bool := false
 
   listen callback/Lambda -> none:
-    pipe := channel_.receive
-    callback.call (TestBrokerTransport pipe)
+    while pipe := channel_.receive:
+      callback.call (TestBrokerTransport pipe)
 
   connect -> TestTransportPipe:
     if is_closed:
@@ -71,6 +73,7 @@ class TestServerTransport implements broker.ServerTransport:
 
   close -> none:
     is_closed = true
+    channel_.send null
 
 
 monitor TestTransportPipe:
@@ -109,32 +112,80 @@ monitor TestTransportPipe:
   broker_is_closed -> bool:
     return is_closed
 
+monitor Pipe_ implements reader.Reader:
+  data_ /any := null
+  is_closed_ /bool := false
+
+  read -> ByteArray?:
+    await: data_ or is_closed_
+    if is_closed_: return null
+    result := data_
+    data_ = null
+    return result
+
+  close:
+    is_closed_ = true
+
+  write bytes/ByteArray -> none:
+    await: not data_
+    data_ = bytes
+
+
 class LoggingTransport implements mqtt.Transport:
-  log := []
+  intercepted_bytes_ := []
   wrapped_ /mqtt.Transport
 
   constructor .wrapped_:
 
   write bytes/ByteArray -> int:
     // We assume that all bytes are always fully written.
-    log.add [ "write", bytes ]
-    return wrapped_.write bytes
+    written := wrapped_.write bytes
+    intercepted_bytes_.add [ "write", bytes[0..written] ]
+    return written
 
   read -> ByteArray?:
     result := wrapped_.read
-    log.add [ "read", result ]
+    intercepted_bytes_.add [ "read", result ]
     return result
 
   close -> none:
-    log.add [ "close" ]
+    intercepted_bytes_.add [ "close" ]
     wrapped_.close
 
   supports_reconnect -> bool:
     return true
 
   reconnect -> none:
-    log.add [ "reconnect" ]
+    intercepted_bytes_.add [ "reconnect" ]
     wrapped_.reconnect
 
   is_closed -> bool:
     return wrapped_.is_closed
+
+  clear -> none:
+    intercepted_bytes_.clear
+
+  packets -> List:
+    result := []
+    read_pipe := Pipe_
+    read_reader := reader.BufferedReader read_pipe
+    write_pipe := Pipe_
+    write_reader := reader.BufferedReader write_pipe
+
+    done := monitor.Semaphore
+    task --background::
+      while packet := mqtt.Packet.deserialize read_reader:
+        result.add [ "read", packet ]
+      done.up
+    task --background::
+      while packet := mqtt.Packet.deserialize write_reader:
+        result.add [ "write", packet ]
+      done.up
+    intercepted_bytes_.do:
+      if it[0] == "read": read_pipe.write it[1]
+      else: write_pipe.write it[1]
+    read_pipe.close
+    write_pipe.close
+    done.down
+    done.down
+    return result

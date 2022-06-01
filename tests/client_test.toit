@@ -100,7 +100,7 @@ test transport/mqtt.Transport --logger/log.Logger:
         publish := packet as mqtt.PublishPacket
         callbacks[publish.topic].call publish
       else:
-        logger.info "Ignored $(stringify_packet packet)"
+        logger.info "Ignored $(mqtt.Packet.debug_string_ packet)"
     logger.info "client shut down"
 
   client.when_running:
@@ -114,7 +114,7 @@ test transport/mqtt.Transport --logger/log.Logger:
 main:
   log_level := log.ERROR_LEVEL
   // log_level := log.DEBUG_LEVEL
-  logger := log.Logger log_level TestLogTarget --name="client test"
+  logger := log.default.with_level log_level
 
   run_test := : | transport | test transport --logger=logger
   with_internal_broker --logger=logger run_test

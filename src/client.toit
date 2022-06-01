@@ -839,7 +839,7 @@ class Client:
     if packet is PublishPacket:
       id := (packet as PublishPacket).packet_id
       if id:
-        ack := PubAckPacket id
+        ack := PubAckPacket --packet_id=id
         // Skip the 'sending_' queue and write directly to the connection.
         // This way ack-packets are transmitted faster.
         do_connected_: connection_.write ack

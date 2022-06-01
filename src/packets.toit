@@ -315,7 +315,7 @@ class PubAckPacket extends Packet:
 
   packet_id/int
 
-  constructor .packet_id:
+  constructor --.packet_id:
     super TYPE
 
   constructor.deserialize_ reader/reader.BufferedReader:
@@ -415,7 +415,7 @@ class UnsubAckPacket extends Packet:
 
   packet_id /int
 
-  constructor .packet_id:
+  constructor --.packet_id:
     super TYPE
 
   constructor.deserialize_ reader/reader.BufferedReader:

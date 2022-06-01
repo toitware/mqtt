@@ -10,9 +10,6 @@ import log
 import log.target
 import mqtt.packets as mqtt
 
-stringify_packet packet/mqtt.Packet -> string:
-
-
 /**
 A simple test target for a logger.
 

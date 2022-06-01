@@ -8,7 +8,6 @@ A simple MQTT broker library.
 This implementation is intended to be used for testing.
 */
 
-import bytes
 import reader
 import writer
 import log
@@ -206,6 +205,7 @@ class Session_:
       existed := subscription_tree_.remove topic
       if not existed:
         logger_.info "client $client_id unsubscribed from non-existent topic $topic"
+    send_ (UnsubAckPacket --packet_id=packet.packet_id)
 
   publish packet/PublishPacket:
     topic := packet.topic
@@ -214,7 +214,7 @@ class Session_:
     needs_ack := packet.qos > 0
     if needs_ack:
       packet_id := packet.packet_id
-      send_ack_ (PubAckPacket packet_id)
+      send_ack_ (PubAckPacket --packet_id=packet_id)
 
     broker.publish packet
 
@@ -271,7 +271,7 @@ class Broker:
   start:
     logger_.info "starting broker"
     server_transport_.listen::
-      logger_.info "listening"
+      logger_.info "connection established"
       connection := Connection_ it
       exception := catch --trace:
         packet := connection.read
@@ -309,10 +309,11 @@ class Broker:
         connack = ConnAckPacket --session_present=session_present --return_code=0x00
 
         connection.write connack
+
+        // Currently we always succeed the connection, so the following 'if' never triggers.
         if connack.return_code != 0:
           connection.close
-        else:
-          TODO here
+          continue.listen
 
   publish packet/PublishPacket:
     if packet.retain:
