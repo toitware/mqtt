@@ -15,26 +15,24 @@ import .broker_mosquitto
 import .log
 import .transport
 
-PING_PONG_MAX ::= 3
+PING_PONG_MAX ::= 100
 
 /**
-Tests that the client and broker correctly ack packets.
+Tests that two clients can communicate through the broker.
 */
-test transport/mqtt.Transport --logger/log.Logger:
-  client1 := mqtt.Client --transport=transport --logger=logger
+test create_transport/Lambda --logger/log.Logger:
   // Mosquitto doesn't support zero-duration keep-alives.
   // Just set it to something really big.
-  options1 := mqtt.SessionOptions --client_id="test_client1" --keep_alive=(Duration --s=10000)
-      --clean_session
+  keep_alive := Duration --s=10_000
+
+  transport1 /mqtt.Transport := create_transport.call
+  client1 := mqtt.Client --transport=transport1 --logger=logger
+  options1 := mqtt.SessionOptions --client_id="test_client1" --keep_alive=keep_alive --clean_session
   client1.connect --options=options1
 
-  client2 := mqtt.Client --transport=transport --logger=logger
-
-  // Mosquitto doesn't support zero-duration keep-alives.
-  // Just set it to something really big.
-  options2 := mqtt.SessionOptions --client_id="test_client2" --keep_alive=(Duration --s=10000)
-      --clean_session
-
+  transport2 /mqtt.Transport := create_transport.call
+  client2 := mqtt.Client --transport=transport2 --logger=logger
+  options2 := mqtt.SessionOptions --client_id="test_client2" --keep_alive=keep_alive --clean_session
   client2.connect --options=options2
 
   client1_callback /Lambda := :: it // Ignore the packet.
@@ -76,24 +74,23 @@ test transport/mqtt.Transport --logger/log.Logger:
       ping_pong_count++
       if ping_pong_count >= PING_PONG_MAX: done.up
       if ping_pong_count <= PING_PONG_MAX:
-        client1.publish "2-to-1" "pong".to_byte_array --qos=qos
+        client2.publish "2-to-1" "pong".to_byte_array --qos=qos
 
   2.repeat:
     qos = it
     ping_pong_count = 0
-    client1.publish "1-to-2" "ping".to_byte_array --qos=qos
+    if it == 0: client1.publish "1-to-2" "ping".to_byte_array --qos=qos
+    else: client2.publish "2-to-1" "ping".to_byte_array --qos=qos
     done.down
     done.down
 
-  sleep --ms=100
   client1.close
   client2.close
 
 main:
-  // log_level := log.ERROR_LEVEL
-  log_level := log.DEBUG_LEVEL
+  log_level := log.ERROR_LEVEL
   logger := log.Logger log_level TestLogTarget --name="client test"
 
-  run_test := : | transport | test transport --logger=logger
-  // with_internal_broker --logger=logger run_test
+  run_test := : | create_transport/Lambda | test create_transport --logger=logger
+  with_internal_broker --logger=logger run_test
   with_mosquitto --logger=logger run_test

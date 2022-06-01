@@ -10,11 +10,10 @@ with_internal_broker --logger/log.Logger [block]:
 
   server_transport := TestServerTransport
   broker := broker.Broker server_transport --logger=logger
-  client_transport := TestClientTransport server_transport
   broker_task := task:: broker.start
 
   try:
-    block.call client_transport
+    block.call:: TestClientTransport server_transport
   finally:
     broker_task.cancel
 

@@ -50,7 +50,6 @@ class ActivityChecker_:
     else:
       // TODO(florian): we are currently sending.
       // We should detect timeouts on the sending.
-      connection_.request_ping_after_current_packet
       return keep_alive_
 
   run:
@@ -91,7 +90,6 @@ class Connection_:
   writer_ /writer.Writer
   writing_ /monitor.Mutex ::= monitor.Mutex
   is_writing_ /bool := false
-  should_write_ping_ /bool := false
 
   closing_reason_ /any := null
 
@@ -142,9 +140,6 @@ class Connection_:
   is_writing -> bool:
     return is_writing_
 
-  request_ping_after_current_packet:
-    should_write_ping_ = true
-
   write packet/Packet:
     // The client already serializes most sends. However, some messages are written without
     // taking the client's lock. For example, 'ack' messages, the 'disconnect' message, or pings
@@ -155,9 +150,6 @@ class Connection_:
         is_writing_ = true
         exception := catch --unwind=(: not is_closed):
           writer_.write packet.serialize
-          if should_write_ping_:
-            should_write_ping_ = false
-            writer_.write (PingReqPacket).serialize
         if exception:
           assert: is_closed
           throw CLIENT_CLOSED_EXCEPTION

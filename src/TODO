@@ -1,22 +1,13 @@
 - prepare persistency
-- unsubscribe
 
 Tests:
-- test that ping packet can't be interleaved with other packets.
-- last will message.
 - client callback takes longer than ping time.
-- topics:
-  * /foo
-  * foo/#
-  * foo/+/bar
 
 - in case of not-clean session.
   * resend ack of message with qos.
   * receive message with qos again, after reconnect.
 
 - break connection before connected_ barrier is set.
-
-- make sure we send acks.
 
 - send some packets that are queued. Then `client.close`. The disconnect message
   should preempt the queued packets.
@@ -47,10 +38,12 @@ Tests:
 
 - test invalid topic in publish (+, #)
 
-- test topic-filter max_qos
+- test subscription topic-filter max_qos
 
 - retained with qos=1
 
 - close client from within a handle.
 
 - empty topic publish throws
+
+- clear retained

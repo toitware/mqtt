@@ -201,7 +201,7 @@ test_publish:
 
 test_puback:
   PACKET_ID_TESTS.do: | packet_id |
-    puback := mqtt.PubAckPacket packet_id
+    puback := mqtt.PubAckPacket --packet_id=packet_id
     deserialized := (test_roundtrip puback) as mqtt.PubAckPacket
     expect_equals packet_id deserialized.packet_id
 
@@ -306,7 +306,7 @@ test_unsubscribe:
 
 test_unsuback:
   PACKET_ID_TESTS.do: | packet_id |
-    unsuback := mqtt.UnsubAckPacket packet_id
+    unsuback := mqtt.UnsubAckPacket --packet_id=packet_id
     deserialized := (test_roundtrip unsuback) as mqtt.UnsubAckPacket
     expect_equals packet_id deserialized.packet_id
 

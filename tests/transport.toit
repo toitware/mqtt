@@ -140,23 +140,23 @@ class LoggingTransport implements mqtt.Transport:
   write bytes/ByteArray -> int:
     // We assume that all bytes are always fully written.
     written := wrapped_.write bytes
-    intercepted_bytes_.add [ "write", bytes[0..written] ]
+    intercepted_bytes_.add [ "write", bytes[0..written], Time.monotonic_us ]
     return written
 
   read -> ByteArray?:
     result := wrapped_.read
-    intercepted_bytes_.add [ "read", result ]
+    intercepted_bytes_.add [ "read", result, Time.monotonic_us ]
     return result
 
   close -> none:
-    intercepted_bytes_.add [ "close" ]
+    intercepted_bytes_.add [ "close", Time.monotonic_us ]
     wrapped_.close
 
   supports_reconnect -> bool:
     return true
 
   reconnect -> none:
-    intercepted_bytes_.add [ "reconnect" ]
+    intercepted_bytes_.add [ "reconnect", Time.monotonic_us ]
     wrapped_.reconnect
 
   is_closed -> bool:
@@ -173,17 +173,25 @@ class LoggingTransport implements mqtt.Transport:
     write_reader := reader.BufferedReader write_pipe
 
     done := monitor.Semaphore
+    ns_for_packet /int? := null
     task --background::
       while packet := mqtt.Packet.deserialize read_reader:
-        result.add [ "read", packet ]
+        result.add [ "read", packet, ns_for_packet ]
       done.up
     task --background::
       while packet := mqtt.Packet.deserialize write_reader:
-        result.add [ "write", packet ]
+        result.add [ "write", packet, ns_for_packet ]
       done.up
     intercepted_bytes_.do:
-      if it[0] == "read": read_pipe.write it[1]
-      else: write_pipe.write it[1]
+      if it[0] == "read":
+        ns_for_packet = it[2]
+        read_pipe.write it[1]
+      else if it[1] == "write":
+        ns_for_packet = it[2]
+        write_pipe.write it[1]
+      else:
+        result.add it
+
     read_pipe.close
     write_pipe.close
     done.down

@@ -86,7 +86,8 @@ test_multisub client/mqtt.Client callbacks/Map --logger/log.Logger:
 
     client.unsubscribe_all TOPICS
 
-test transport/mqtt.Transport --logger/log.Logger:
+test create_transport/Lambda --logger/log.Logger:
+  transport /mqtt.Transport := create_transport.call
   client := mqtt.Client --transport=transport --logger=logger
 
   options := mqtt.SessionOptions --client_id="test_client"
@@ -113,9 +114,8 @@ test transport/mqtt.Transport --logger/log.Logger:
 
 main:
   log_level := log.ERROR_LEVEL
-  // log_level := log.DEBUG_LEVEL
   logger := log.default.with_level log_level
 
-  run_test := : | transport | test transport --logger=logger
+  run_test := : | create_transport/Lambda | test create_transport --logger=logger
   with_internal_broker --logger=logger run_test
   with_mosquitto --logger=logger run_test

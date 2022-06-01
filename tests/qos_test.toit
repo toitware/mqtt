@@ -66,7 +66,8 @@ test_sub_unsub client/mqtt.Client transport/LoggingTransport --logger/log.Logger
 /**
 Tests that the client and broker correctly ack packets.
 */
-test transport/mqtt.Transport --logger/log.Logger:
+test create_transport/Lambda --logger/log.Logger:
+  transport /mqtt.Transport := create_transport.call
   logging_transport := LoggingTransport transport
   client := mqtt.Client --transport=logging_transport --logger=logger
 
@@ -115,10 +116,8 @@ test transport/mqtt.Transport --logger/log.Logger:
 
 main:
   log_level := log.ERROR_LEVEL
-  // log_level := log.DEBUG_LEVEL
   logger := log.Logger log_level TestLogTarget --name="client test"
 
-  run_test := : | transport | test transport --logger=logger
+  run_test := : | create_transport/Lambda | test create_transport --logger=logger
   with_internal_broker --logger=logger run_test
   with_mosquitto --logger=logger run_test
-  // with_external_mosquitto --logger=logger run_test

@@ -111,7 +111,7 @@ class Session_:
           else:
             with_timeout --ms=(keep_alive.in_ms * 2):
               packet = connection.read
-          if not packet: break
+          if not packet and state_ != STATE_DISCONNECTED_: throw "CLIENT_DISCONNECTED"
           logger_.debug "received $(Packet.debug_string_ packet) from client $client_id"
           try:
             handle packet
@@ -229,19 +229,24 @@ class Session_:
     if connection_:
       connection_.close
       connection_ = null
+
+    // Send the last will before we kill all tasks.
+    // Otherwise we will cancel the task on which we currently run on.
+    if reason and last_will_:
+      packet_id := last_will_.qos > 0 ? next_packet_id_++ : null
+      packet := PublishPacket last_will_.topic last_will_.payload \
+          --qos=last_will_.qos --packet_id=packet_id --retain=last_will_.retain
+      broker.publish packet
+
+    if clean_session: broker.remove_session_ client_id
+
     if reader_task_:
       reader_task_.cancel
       reader_task_ = null
     if writer_task_:
       writer_task_.cancel
       writer_task_ = null
-    if reason and last_will_:
-        packet_id := last_will_.qos > 0 ? next_packet_id_++ : null
-        packet := PublishPacket last_will_.topic last_will_.payload \
-            --qos=last_will_.qos --packet_id=packet_id --retain=last_will_.retain
-        broker.publish packet
 
-    if clean_session: broker.remove_session_ client_id
 
   send_ packet/Packet:
     queued_.add_packet packet
@@ -250,6 +255,7 @@ class Session_:
     queued_.add_ack ack
 
   dispatch_incoming_publish packet/PublishPacket:
+    if state_ == STATE_DISCONNECTED_: return
     // There doesn't seem to be a rule which qos we should use if multiple
     // subscriptions match. We thus use the one from the most specialized.
     subscription_tree_.do --most_specialized packet.topic: | subscription_max_qos |
@@ -258,10 +264,24 @@ class Session_:
       packet_id := qos > 0 ? next_packet_id_++ : NO_PACKET_ID
       send_ (packet.with --packet_id=packet_id --qos=qos)
 
+
+/** An unbounded channel for publish messages. */
+monitor PublishChannel_:
+  // Messages that haven't been sent yet.
+  queued_ /Deque := Deque
+
+  next -> Packet?:
+    await: not queued_.is_empty
+    return queued_.remove_first
+
+  add packet/Packet:
+    queued_.add packet
+
 class Broker:
   sessions_ /Map ::= {:}
   server_transport_ /ServerTransport
   logger_ /log.Logger
+  publish_channel_ /PublishChannel_ ::= PublishChannel_
 
   retained /TopicTree ::= TopicTree
 
@@ -270,59 +290,71 @@ class Broker:
 
   start:
     logger_.info "starting broker"
-    server_transport_.listen::
-      logger_.info "connection established"
-      connection := Connection_ it
-      exception := catch --trace:
-        packet := connection.read
-        logger_.info "read packet $(Packet.debug_string_ packet)"
-        if packet is not ConnectPacket:
-          logger_.error "didn't receive connect packet, but got packet of type $packet.type"
-          connection.close
-          continue.listen
 
-        connect := packet as ConnectPacket
+    publish_task := task --background::
+      while true:
+        packet := publish_channel_.next
+        sessions_.do  --values: | session |
+          session.dispatch_incoming_publish packet
 
-        logger_.info "new connection-request: $(Packet.debug_string_ connect)"
+    try:
+      server_transport_.listen::
+        logger_.info "connection established"
+        connection := Connection_ it
+        exception := catch --trace:
+          packet := connection.read
+          logger_.info "read packet $(Packet.debug_string_ packet)"
+          if packet is not ConnectPacket:
+            logger_.error "didn't receive connect packet, but got packet of type $packet.type"
+            connection.close
+            continue.listen
 
-        client_id := connect.client_id
-        connack /ConnAckPacket ::= ?
+          connect := packet as ConnectPacket
 
-        clean_session := connect.clean_session
-        if client_id == "": client_id = "unknown-$(random)"
-        session_present /bool ::= ?
-        session /Session_? := sessions_.get connect.client_id
-        if session and (clean_session or session.clean_session):
-          logger_.info "removing existing session for client $client_id"
-          session.disconnect
-          session = null
-        if session:
-          logger_.info "existing session for client $client_id"
-          session_present = true
-        else:
-          logger_.info "new session for client $client_id"
-          session = Session_ client_id --broker=this --logger=logger_ --clean_session=clean_session
-          sessions_[connect.client_id] = session
-          session_present = false
+          logger_.info "new connection-request: $(Packet.debug_string_ connect)"
 
-        session.run connection --keep_alive=connect.keep_alive --last_will=connect.last_will
-        connack = ConnAckPacket --session_present=session_present --return_code=0x00
+          client_id := connect.client_id
+          connack /ConnAckPacket ::= ?
 
-        connection.write connack
+          clean_session := connect.clean_session
+          if client_id == "": client_id = "unknown-$(random)"
+          session_present /bool ::= ?
+          session /Session_? := sessions_.get connect.client_id
+          if session and (clean_session or session.clean_session):
+            logger_.info "removing existing session for client $client_id"
+            session.disconnect
+            session = null
+          if session:
+            logger_.info "existing session for client $client_id"
+            session_present = true
+          else:
+            logger_.info "new session for client $client_id"
+            session = Session_ client_id --broker=this --logger=logger_ --clean_session=clean_session
+            sessions_[connect.client_id] = session
+            session_present = false
 
-        // Currently we always succeed the connection, so the following 'if' never triggers.
-        if connack.return_code != 0:
-          connection.close
-          continue.listen
+          session.run connection --keep_alive=connect.keep_alive --last_will=connect.last_will
+          connack = ConnAckPacket --session_present=session_present --return_code=0x00
+
+          connection.write connack
+
+          // Currently we always succeed the connection, so the following 'if' never triggers.
+          if connack.return_code != 0:
+            connection.close
+            continue.listen
+    finally:
+      publish_task.cancel
 
   publish packet/PublishPacket:
+    logger_.info "publishing $(Packet.debug_string_ packet)"
     if packet.retain:
       if packet.payload.size == 0: retained.remove packet.topic
       else: retained.set packet.topic packet
       packet = packet.with --no-retain
 
-    sessions_.do  --values: | session |
-      session.dispatch_incoming_publish packet
+    // Hand over the packet to the publish channel.
+    // We can't notify the sessions ourselves as the current task might be killed soon.
+    publish_channel_.add packet
 
   remove_session_ client_id/string:
     sessions_.remove client_id
