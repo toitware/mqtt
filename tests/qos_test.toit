@@ -63,6 +63,45 @@ test_sub_unsub client/mqtt.Client transport/LoggingTransport --logger/log.Logger
   expect unsubscribe.packet_id == unsub_ack.packet_id
   // The other 2 packets are the idle packets.
 
+test_max_qos client/mqtt.Client transport/LoggingTransport --logger/log.Logger [--wait_for_idle]:
+
+  2.repeat: | max_qos |
+    topic := "foo/bar$max_qos"
+    client.subscribe topic --max_qos=max_qos
+    wait_for_idle.call
+
+    2.repeat: | packet_qos |
+      transport.clear
+      client.publish topic "bar".to_byte_array --qos=packet_qos
+      wait_for_idle.call
+
+      expect_count := 4
+      if packet_qos != 0:
+        // If the packet_qos is 0, then there will never be an ack.
+        expect_count++
+        // If the packet qos is 1, then there might be another ack to the sub.
+        if max_qos != 0: expect_count++
+
+      logs := transport.packets
+      expect_equals expect_count logs.size
+      reads := logs.filter: it[0] == "read"
+      writes := logs.filter: it[0] == "write"
+
+      to_broker := writes[0][1] as mqtt.PublishPacket
+      expect_equals topic to_broker.topic
+      if packet_qos == 0:
+        expect_null to_broker.packet_id
+      else:
+        to_broker_ack := (reads.filter: it[1] is mqtt.PubAckPacket)[0][1]
+        expect_equals to_broker.packet_id to_broker_ack.packet_id
+
+      from_broker := (reads.filter: it[1] is mqtt.PublishPacket)[0][1]
+      if packet_qos == 0 or max_qos == 0:
+        expect_null from_broker.packet_id
+      else:
+        from_broker_ack := (writes.filter: it[1] is mqtt.PubAckPacket)[0][1]
+        expect_equals from_broker.packet_id from_broker_ack.packet_id
+
 /**
 Tests that the client and broker correctly ack packets.
 */
@@ -111,6 +150,7 @@ test create_transport/Lambda --logger/log.Logger:
 
 
   test_sub_unsub client logging_transport --logger=logger --wait_for_idle=wait_for_idle
+  test_max_qos client logging_transport --logger=logger --wait_for_idle=wait_for_idle
 
   client.close
 

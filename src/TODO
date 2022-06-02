@@ -38,8 +38,6 @@ Tests:
 
 - test invalid topic in publish (+, #)
 
-- test subscription topic-filter max_qos
-
 - retained with qos=1
 
 - close client from within a handle.

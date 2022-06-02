@@ -186,7 +186,7 @@ class LoggingTransport implements mqtt.Transport:
       if it[0] == "read":
         ns_for_packet = it[2]
         read_pipe.write it[1]
-      else if it[1] == "write":
+      else if it[0] == "write":
         ns_for_packet = it[2]
         write_pipe.write it[1]
       else:
