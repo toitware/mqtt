@@ -38,10 +38,6 @@ Tests:
 
 - test invalid topic in publish (+, #)
 
-- retained with qos=1
-
 - close client from within a handle.
 
 - empty topic publish throws
-
-- clear retained
