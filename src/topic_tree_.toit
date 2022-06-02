@@ -41,10 +41,10 @@ class TopicTree:
     node /TopicTreeNode_? := root_
     // Keep track of the parent node where we can (maybe) remove the child node from.
     // Any parent that has more than one child or has a value must stay.
-    parent_to_remove_from /TopicTreeNode_? := root_
-    topic_level_to_remove /string? := topic
+    parent_to_remove_from /TopicTreeNode_? := null
+    topic_level_to_remove /string? := null
     topic_levels.do: | topic_level |
-      if node.value_ or node.children.size > 1:
+      if node == root_ or node.value_ or node.children.size > 1:
         parent_to_remove_from = node
         topic_level_to_remove = topic_level
 

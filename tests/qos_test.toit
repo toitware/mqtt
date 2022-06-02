@@ -12,7 +12,6 @@ import net
 
 import .broker_internal
 import .broker_mosquitto
-import .log
 import .transport
 
 test_publish client/mqtt.Client transport/LoggingTransport --auto_ack_enabled/bool --logger/log.Logger [--wait_for_idle]:
@@ -64,7 +63,6 @@ test_sub_unsub client/mqtt.Client transport/LoggingTransport --logger/log.Logger
   // The other 2 packets are the idle packets.
 
 test_max_qos client/mqtt.Client transport/LoggingTransport --logger/log.Logger [--wait_for_idle]:
-
   2.repeat: | max_qos |
     topic := "foo/bar$max_qos"
     client.subscribe topic --max_qos=max_qos
@@ -152,11 +150,13 @@ test create_transport/Lambda --logger/log.Logger:
   test_sub_unsub client logging_transport --logger=logger --wait_for_idle=wait_for_idle
   test_max_qos client logging_transport --logger=logger --wait_for_idle=wait_for_idle
 
+  // TODO(florian): this shouldn't be necessary.
+  sleep --ms=100
   client.close
 
 main:
   log_level := log.ERROR_LEVEL
-  logger := log.Logger log_level TestLogTarget --name="client test"
+  logger := log.default.with_level log_level
 
   run_test := : | create_transport/Lambda | test create_transport --logger=logger
   with_internal_broker --logger=logger run_test

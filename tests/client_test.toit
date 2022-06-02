@@ -12,7 +12,6 @@ import net
 
 import .broker_internal
 import .broker_mosquitto
-import .log
 import .transport
 
 test_pubsub client/mqtt.Client callbacks/Map --logger/log.Logger:
@@ -60,6 +59,7 @@ test_pubsub client/mqtt.Client callbacks/Map --logger/log.Logger:
       callbacks.remove topic
 
 test_multisub client/mqtt.Client callbacks/Map --logger/log.Logger:
+  client.subscribe "idle"
   2.repeat: | max_qos |
     logger.info "Testing multi-subscription with max-qos=$max_qos"
 
@@ -70,7 +70,11 @@ test_multisub client/mqtt.Client callbacks/Map --logger/log.Logger:
     ]
 
     wait_for_bar := monitor.Latch
+    idle := monitor.Semaphore
     seen_not_bar := false
+
+    callbacks["idle"] = :: | packet/mqtt.PublishPacket |
+      idle.up
 
     callbacks["foo/bar/gee"] = :: | packet/mqtt.PublishPacket |
       if packet.payload.to_string == "bar": wait_for_bar.set true
@@ -85,6 +89,8 @@ test_multisub client/mqtt.Client callbacks/Map --logger/log.Logger:
     client.publish "foo/bar/gee" "bar".to_byte_array --qos=1
 
     client.unsubscribe_all TOPICS
+    client.publish "idle" #[] --qos=0
+    idle.down
 
 test create_transport/Lambda --logger/log.Logger:
   transport /mqtt.Transport := create_transport.call

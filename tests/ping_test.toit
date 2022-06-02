@@ -12,35 +12,29 @@ import net
 
 import .broker_internal
 import .broker_mosquitto
-import .log
 import .transport
+import .packet_test_client
 
 /**
 Tests that the client and broker correctly ack packets.
 */
-test create_transport/Lambda --logger/log.Logger:
-  transport /mqtt.Transport := create_transport.call
-  logging_transport := LoggingTransport transport
-  client := mqtt.Client --transport=logging_transport --logger=logger
-
-  options := mqtt.SessionOptions --client_id="test_client" --keep_alive=(Duration --s=1)
+test create_transport/Lambda logger/log.Logger:
+  options := mqtt.SessionOptions --client_id="test_client"
+      --keep_alive=(Duration --s=1)
       --clean_session
-  client.connect --options=options
+  with_packet_client create_transport
+      --options=options
+      --logger=logger : | client/mqtt.Client _ _ get_packets/Lambda |
+    sleep --ms=2_000
 
-  sleep --ms=2_000
-
-  packets := logging_transport.packets
-  sent_ping := packets.any:
-    if it[0] == "write": print (mqtt.Packet.debug_string_ it[1])
-    it[0] == "write" and it[1] is mqtt.PingReqPacket
-  expect sent_ping
-
-  client.close
+    packets := get_packets.call
+    sent_ping := packets.any:
+      it[0] == "write" and it[1] is mqtt.PingReqPacket
+    expect sent_ping
 
 main:
   log_level := log.ERROR_LEVEL
-  logger := log.Logger log_level TestLogTarget --name="client test"
+  logger := log.default.with_level log_level
 
-  run_test := : | create_transport/Lambda | test create_transport --logger=logger
-  with_internal_broker --logger=logger run_test
-  with_mosquitto --logger=logger run_test
+  with_internal_broker --logger=logger: test it logger
+  with_mosquitto --logger=logger: test it logger

@@ -12,7 +12,6 @@ import net
 
 import .broker_internal
 import .broker_mosquitto
-import .log
 import .transport
 
 PING_PONG_MAX ::= 100
@@ -89,7 +88,7 @@ test create_transport/Lambda --logger/log.Logger:
 
 main:
   log_level := log.ERROR_LEVEL
-  logger := log.Logger log_level TestLogTarget --name="client test"
+  logger := log.default.with_level log_level
 
   run_test := : | create_transport/Lambda | test create_transport --logger=logger
   with_internal_broker --logger=logger run_test
