@@ -18,10 +18,10 @@ import .transport
 Tests that the client and broker correctly ack packets.
 */
 test create_transport/Lambda --logger/log.Logger:
+  topic := "test/retain"
   with_packet_client create_transport
       --logger=logger : | client/mqtt.Client wait_for_idle/Lambda clear/Lambda get_packets/Lambda |
 
-    topic := "test/retain"
     client.subscribe topic
     client.publish topic "test".to_byte_array
     wait_for_idle.call
@@ -71,6 +71,44 @@ test create_transport/Lambda --logger/log.Logger:
     // 2 for the idle.
     // No retained packet.
     expect_equals 4 get_packets.call.size
+
+    // Check that other clients also get the retained message.
+
+    client.publish topic "available for other clients".to_byte_array --qos=0 --retain
+
+    with_packet_client create_transport
+        --device_id = "other client"
+        --logger = logger:
+      | client/mqtt.Client wait_for_idle/Lambda clear/Lambda get_packets/Lambda |
+
+      clear.call
+      client.subscribe topic
+      wait_for_idle.call
+
+      packets := get_packets.call
+      reads := packets.filter: it[0] == "read" and it[1] is mqtt.PublishPacket
+      retained /mqtt.PublishPacket := reads.first[1]
+      expect_equals topic retained.topic
+      expect_equals "available for other clients" retained.payload.to_string
+      expect retained.retain
+
+  // The retained message stays even when the original sender has died.
+  with_packet_client create_transport
+      --device_id = "third client"
+      --logger = logger:
+    | client/mqtt.Client wait_for_idle/Lambda clear/Lambda get_packets/Lambda |
+
+    clear.call
+    client.subscribe topic
+    wait_for_idle.call
+
+    packets := get_packets.call
+    reads := packets.filter: it[0] == "read" and it[1] is mqtt.PublishPacket
+    retained /mqtt.PublishPacket := reads.first[1]
+    expect_equals topic retained.topic
+    expect_equals "available for other clients" retained.payload.to_string
+    expect retained.retain
+
 
 main:
   log_level := log.ERROR_LEVEL

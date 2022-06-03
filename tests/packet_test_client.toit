@@ -13,10 +13,11 @@ import .transport
 /**
 Tests that the client and broker correctly ack packets.
 */
-with_packet_client create_transport/Lambda
-    --logger/log.Logger [block]
-    --clean_session/bool=true
-    --keep_alive=(Duration --s=10_000): // Mosquitto doesn't support 0-duration keep-alives.
+with_packet_client create_transport/Lambda [block]
+    --logger /log.Logger
+    --device_id/string = "test-client"
+    --clean_session /bool = true
+    --keep_alive /Duration = (Duration --s=10_000): // Mosquitto doesn't support 0-duration keep-alives.
   transport /mqtt.Transport := create_transport.call
   logging_transport := LoggingTransport transport
   client := mqtt.Client --transport=logging_transport --logger=logger
@@ -24,7 +25,7 @@ with_packet_client create_transport/Lambda
   // Mosquitto doesn't support zero-duration keep-alives.
   // Just set it to something really big.
   options := mqtt.SessionOptions
-      --client_id = "test_client"
+      --client_id = device_id
       --keep_alive = keep_alive
       --clean_session = clean_session
   client.connect --options=options
