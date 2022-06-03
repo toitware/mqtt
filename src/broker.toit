@@ -103,7 +103,7 @@ class Session_:
 
     connection_ = connection
     reader_task_ = task::
-      exception := catch --trace:
+      exception := catch:
         while true:
           packet := null
           if keep_alive == (Duration --s=0):
@@ -114,7 +114,8 @@ class Session_:
           if not packet and state_ != STATE_DISCONNECTED_: throw "CLIENT_DISCONNECTED"
           logger_.debug "received $(Packet.debug_string_ packet) from client $client_id"
           try:
-            handle packet
+            catch --trace --unwind=true:
+              handle packet
           finally: | is_exception _ |
             if is_exception:
               logger_.error "error handling packet $(Packet.debug_string_ packet)"

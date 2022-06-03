@@ -587,7 +587,9 @@ class Client:
       handling_latch_.set true
       while true:
         packet /Packet? := null
-        do_connected_: packet = connection_.read
+        catch --unwind=(: not state_ == STATE_DISCONNECTED_):
+          do_connected_ --allow_disconnected: packet = connection_.read
+
         if not packet:
           // Normally the broker should only close the connection when we have
           // sent a disconnect. However, we are also ok with being in a closed state.
@@ -692,8 +694,8 @@ class Client:
   Forcefully closes the client.
   */
   close_force_ -> none:
-    assert: state_ == STATE_HANDLING_
-    // Since we are in a handling state, there must have been a $connect call, and as such
+    assert: state_ == STATE_HANDLING_ or state_ == STATE_DISCONNECTED_
+    // Since we are in a handling/disconnected state, there must have been a $connect call, and as such
     // a reconnection_strategy
     assert: session_
 
@@ -844,8 +846,8 @@ class Client:
       if is_closed: throw CLIENT_CLOSED_EXCEPTION
       do_connected_: connection_.write packet
 
-  do_connected_ [block]:
-    if is_closed: throw CLIENT_CLOSED_EXCEPTION
+  do_connected_ --allow_disconnected/bool=false [block]:
+    if is_closed and not (allow_disconnected and state_ == STATE_DISCONNECTED_): throw CLIENT_CLOSED_EXCEPTION
     while true:
       // If the connection is still alive, or if the manager doesn't want us to reconnect, let the
       // exception go through.

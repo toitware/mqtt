@@ -13,17 +13,20 @@ import .transport
 /**
 Tests that the client and broker correctly ack packets.
 */
-with_packet_client create_transport/Lambda --logger/log.Logger [block] --options/mqtt.SessionOptions?=null:
+with_packet_client create_transport/Lambda
+    --logger/log.Logger [block]
+    --clean_session/bool=true
+    --keep_alive=(Duration --s=10_000): // Mosquitto doesn't support 0-duration keep-alives.
   transport /mqtt.Transport := create_transport.call
   logging_transport := LoggingTransport transport
   client := mqtt.Client --transport=logging_transport --logger=logger
 
   // Mosquitto doesn't support zero-duration keep-alives.
   // Just set it to something really big.
-  options = options or
-      (mqtt.SessionOptions --client_id="test_client"
-          --keep_alive=(Duration --s=10_000)
-          --clean_session)
+  options := mqtt.SessionOptions
+      --client_id = "test_client"
+      --keep_alive = keep_alive
+      --clean_session = clean_session
   client.connect --options=options
 
   // We are going to use a "idle" ping packet to know when the broker is idle.

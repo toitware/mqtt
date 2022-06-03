@@ -77,7 +77,7 @@ test create_transport/Lambda --logger/log.Logger:
     test_topic topic create_transport --logger=logger --mode="publish"
 
 main:
-  log_level := log.INFO_LEVEL
+  log_level := log.ERROR_LEVEL
   logger := log.default.with_level log_level
 
   run_test := : | create_transport/Lambda | test create_transport --logger=logger

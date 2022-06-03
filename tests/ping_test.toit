@@ -19,11 +19,8 @@ import .packet_test_client
 Tests that the client and broker correctly ack packets.
 */
 test create_transport/Lambda logger/log.Logger:
-  options := mqtt.SessionOptions --client_id="test_client"
-      --keep_alive=(Duration --s=1)
-      --clean_session
   with_packet_client create_transport
-      --options=options
+      --keep_alive = (Duration --s=1)
       --logger=logger : | client/mqtt.Client _ _ get_packets/Lambda |
     sleep --ms=2_000
 
