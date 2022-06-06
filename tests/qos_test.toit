@@ -14,36 +14,36 @@ import .broker_internal
 import .broker_mosquitto
 import .transport
 
-test_publish client/mqtt.Client transport/LoggingTransport --auto_ack_enabled/bool --logger/log.Logger [--wait_for_idle]:
+test_publish client/mqtt.Client transport/TestTransport --auto_ack_enabled/bool --logger/log.Logger [--wait_for_idle]:
   2.repeat: | qos |
     transport.clear
     client.publish "foo/bar/gee" "bar".to_byte_array --qos=qos
     wait_for_idle.call
 
-    logs := transport.packets
+    activity := transport.activity
     expected_count := qos == 0 ? 3 : 4
-    expect_equals expected_count logs.size
-    expect_equals "write" logs[0][0]  // The publish.
-    publish := logs[0][1] as mqtt.PublishPacket
+    expect_equals expected_count activity.size
+    expect_equals "write" activity[0][0]  // The publish.
+    publish := activity[0][1] as mqtt.PublishPacket
     if qos == 0:
       expect_null publish.packet_id
     else:
-      response := logs[1][0] == "read" ? logs[1] : logs[2]
+      response := activity[1][0] == "read" ? activity[1] : activity[2]
       ack := response[1] as mqtt.PubAckPacket
       expect publish.packet_id == ack.packet_id
     // The other 2 packets are the idle packets.
 
-test_sub_unsub client/mqtt.Client transport/LoggingTransport --logger/log.Logger [--wait_for_idle]:
+test_sub_unsub client/mqtt.Client transport/TestTransport --logger/log.Logger [--wait_for_idle]:
   // Subscriptions always have qos=1.
   transport.clear
   client.subscribe "foo/bar"
   wait_for_idle.call
 
-  logs := transport.packets
-  expect_equals 4 logs.size
-  expect_equals "write" logs[0][0]  // The subscription.
-  subscribe := logs[0][1] as mqtt.SubscribePacket
-  response := logs[1][0] == "read" ? logs[1] : logs[2]
+  activity := transport.activity
+  expect_equals 4 activity.size
+  expect_equals "write" activity[0][0]  // The subscription.
+  subscribe := activity[0][1] as mqtt.SubscribePacket
+  response := activity[1][0] == "read" ? activity[1] : activity[2]
   sub_ack := response[1] as mqtt.SubAckPacket
   expect subscribe.packet_id == sub_ack.packet_id
   // The other 2 packets are the idle packets.
@@ -53,16 +53,16 @@ test_sub_unsub client/mqtt.Client transport/LoggingTransport --logger/log.Logger
   client.unsubscribe "foo/bar"
   wait_for_idle.call
 
-  logs = transport.packets
-  expect_equals 4 logs.size
-  expect_equals "write" logs[0][0]  // The subscription.
-  unsubscribe := logs[0][1] as mqtt.UnsubscribePacket
-  response = logs[1][0] == "read" ? logs[1] : logs[2]
+  activity = transport.activity
+  expect_equals 4 activity.size
+  expect_equals "write" activity[0][0]  // The subscription.
+  unsubscribe := activity[0][1] as mqtt.UnsubscribePacket
+  response = activity[1][0] == "read" ? activity[1] : activity[2]
   unsub_ack := response[1] as mqtt.UnsubAckPacket
   expect unsubscribe.packet_id == unsub_ack.packet_id
   // The other 2 packets are the idle packets.
 
-test_max_qos client/mqtt.Client transport/LoggingTransport --logger/log.Logger [--wait_for_idle]:
+test_max_qos client/mqtt.Client transport/TestTransport --logger/log.Logger [--wait_for_idle]:
   2.repeat: | max_qos |
     topic := "foo/bar$max_qos"
     client.subscribe topic --max_qos=max_qos
@@ -80,10 +80,10 @@ test_max_qos client/mqtt.Client transport/LoggingTransport --logger/log.Logger [
         // If the packet qos is 1, then there might be another ack to the sub.
         if max_qos != 0: expect_count++
 
-      logs := transport.packets
-      expect_equals expect_count logs.size
-      reads := logs.filter: it[0] == "read"
-      writes := logs.filter: it[0] == "write"
+      activity := transport.activity
+      expect_equals expect_count activity.size
+      reads := activity.filter: it[0] == "read"
+      writes := activity.filter: it[0] == "write"
 
       to_broker := writes[0][1] as mqtt.PublishPacket
       expect_equals topic to_broker.topic
@@ -105,7 +105,7 @@ Tests that the client and broker correctly ack packets.
 */
 test create_transport/Lambda --logger/log.Logger:
   transport /mqtt.Transport := create_transport.call
-  logging_transport := LoggingTransport transport
+  logging_transport := TestTransport transport
   client := mqtt.Client --transport=logging_transport --logger=logger
 
   // Mosquitto doesn't support zero-duration keep-alives.

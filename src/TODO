@@ -1,42 +1,7 @@
-- prepare persistency
-
 Tests:
-- client callback takes longer than ping time.
-
-- in case of not-clean session.
-  * resend ack of message with qos.
-  * receive message with qos again, after reconnect.
-
-- break connection before connected_ barrier is set.
-
-- send some packets that are queued. Then `client.close`. The disconnect message
-  should preempt the queued packets.
-
-- send some packets with qos=1.
-  Don't send acks back.
-  Close (disconnect).
-  The packets are in unconfirmed state.
-
-- throw when trying to send a disconnect message.
-  The client should not reconnect. I think.
-  If there are still messages queued.
-
-- let the handler throw.
-  Should it be caught, or brings it down the whole client?
-
 - start connecting, then close the connection (with 'close') while CONNECTING is still active.
 
 - transport block at first write (throw in 'write' of transport.)
-
-- connect, then publish but don't call handle.
-
-- test with keep-alive 0. (No activity checks.)
-
-- test that retain flag is set when receiving a retained message.
-
-- test invalid topics. (Mosquitto disconnects due to "malformed packet")
-
-- test invalid topic in publish (+, #)
 
 - close client from within a handle.
 

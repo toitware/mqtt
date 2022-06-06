@@ -39,6 +39,9 @@ interface Transport implements reader.Reader:
 
   /**
   Reconnects the transport.
+
+  If the transport $supports_reconnect, it should try to reconnect.
+  Normally, the transport is in a closed state when reconnect is called.
   */
   reconnect -> none
 

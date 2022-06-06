@@ -6,6 +6,7 @@
 A simple transport for testing.
 */
 
+import bytes
 import mqtt.transport as mqtt
 import mqtt.broker as broker
 import mqtt.packets as mqtt
@@ -80,37 +81,45 @@ monitor TestTransportPipe:
   client_to_broker_data_ /Deque := Deque
   broker_to_client_data_ /Deque := Deque
 
-  is_closed := false
+  closed_from_client_ /bool := false
+  closed_from_broker_ /bool := false
 
   client_write bytes/ByteArray -> none:
+    if is_closed_: throw "CLOSED"
     client_to_broker_data_.add bytes
 
   client_read -> ByteArray?:
-    await: broker_to_client_data_.size > 0 or is_closed
+    await: broker_to_client_data_.size > 0 or is_closed_
+    if closed_from_client_: throw "CLOSED"
     if broker_to_client_data_.is_empty: return null
     result := broker_to_client_data_.remove_first
     return result
 
   client_close:
-    is_closed = true
+    closed_from_client_ = true
 
   client_is_closed -> bool:
-    return is_closed
+    return is_closed_
 
 
   broker_write bytes/ByteArray -> none:
+    if is_closed_: throw "CLOSED"
     broker_to_client_data_.add bytes
 
   broker_read -> ByteArray?:
-    await: client_to_broker_data_.size > 0 or is_closed
+    await: client_to_broker_data_.size > 0 or is_closed_
+    if closed_from_broker_: throw "CLOSED"
     if client_to_broker_data_.is_empty: return null
     return client_to_broker_data_.remove_first
 
   broker_close:
-    is_closed = true
+    closed_from_broker_ = true
 
   broker_is_closed -> bool:
-    return is_closed
+    return is_closed_
+
+  is_closed_ -> bool:
+    return closed_from_client_ or closed_from_broker_
 
 monitor Pipe_ implements reader.Reader:
   data_ /any := null
@@ -131,69 +140,137 @@ monitor Pipe_ implements reader.Reader:
     data_ = bytes
 
 
-class LoggingTransport implements mqtt.Transport:
-  intercepted_bytes_ := []
-  wrapped_ /mqtt.Transport
+class InterceptingReader_ implements reader.Reader:
+  wrapped_ /reader.Reader
+  intercepted /Deque := Deque
 
   constructor .wrapped_:
 
-  write bytes/ByteArray -> int:
-    // We assume that all bytes are always fully written.
-    written := wrapped_.write bytes
-    intercepted_bytes_.add [ "write", bytes[0..written], Time.monotonic_us ]
+  read -> ByteArray?:
+    bytes := wrapped_.read
+    intercepted.add bytes
+    return bytes
+
+
+class TestTransport implements mqtt.Transport:
+  activity_ := []
+
+  // The bytes that have been read but aren't yet yielding a full packet.
+  pending_bytes_read_ := []
+  // The bytes that have been written but aren't yet yielding a full packet.
+  pending_bytes_write_ := []
+
+  wrapped_ /mqtt.Transport
+  read_filter_ /Lambda?
+  write_filter_ /Lambda?
+
+  read_task_ /Task_? := null
+  read_channel_ /monitor.Channel := monitor.Channel 20
+
+  /**
+  Keeps track of writes that need several `write` calls.
+  We assume that the first attempt to $write always contains a full packet.
+  Further attempts just write the rest of the packet.
+  */
+  remaining_to_write_ /int := 0
+  packet_being_written_ /mqtt.Packet? := null
+
+  constructor .wrapped_ --read_filter/Lambda?=null --write_filter/Lambda?=null:
+    read_filter_ = read_filter
+    write_filter_ = write_filter
+    start_reading_
+
+  start_reading_ -> none:
+    if read_task_:
+      read_task_.cancel
+      old_channel := read_channel_
+      read_channel_ = monitor.Channel 20
+      old_channel.send null  // In case something is listening.
+
+    read_task_ = task --background::
+      should_unwind := false
+      exception_or_null := catch --unwind=should_unwind:
+        // Some pending bytes that aren't in the intercepted reader anymore, but still
+        // need to be sent.
+        pending /ByteArray? := null
+        intercepting_reader := InterceptingReader_ wrapped_
+        buffered := reader.BufferedReader intercepting_reader
+        while packet := mqtt.Packet.deserialize buffered:
+          if read_filter_:
+            packet = read_filter_.call packet
+          if not packet: continue
+          activity_.add [ "read", packet, Time.monotonic_us ]
+          serialized := packet.serialize
+          intercepted_bytes := intercepting_reader.intercepted
+          forwarded_count := 0
+          forwarded_bytes := #[]
+          while forwarded_count < serialized.size:
+            if not pending: pending = intercepted_bytes.remove_first
+            to_forward := ?
+            if pending.size + forwarded_count < serialized.size:
+              to_forward = pending
+              pending = null
+            else:
+              to_forward = pending[0..serialized.size - forwarded_count]
+              pending = pending[serialized.size - forwarded_count..]
+            read_channel_.send to_forward
+            forwarded_count += to_forward.size
+            forwarded_bytes += to_forward
+          if forwarded_bytes != serialized:
+            should_unwind = true
+            throw "Serialized packet doesn't match forwarded bytes"
+
+      if exception_or_null is ByteArray: throw "UNEXPECTED EXCEPTION TYPE"
+      read_channel_.send exception_or_null
+
+  write byte_array/ByteArray -> int:
+    reader := reader.BufferedReader (bytes.Reader byte_array)
+    if remaining_to_write_ == 0:
+      // We assume that the first attempt to write bytes represent a full packet.
+      packet := mqtt.Packet.deserialize reader
+      if write_filter_:
+        packet = write_filter_.call packet
+      if not packet: return byte_array.size
+      remaining_to_write_ = byte_array.size
+      packet_being_written_ = packet
+
+    written := wrapped_.write byte_array
+    remaining_to_write_ -= written
+    if remaining_to_write_ == 0:
+      activity_.add [ "write", packet_being_written_, Time.monotonic_us ]
+      packet_being_written_ = null
     return written
 
   read -> ByteArray?:
-    result := wrapped_.read
-    intercepted_bytes_.add [ "read", result, Time.monotonic_us ]
+    channel := read_channel_
+    result := channel.receive
+    if channel != read_channel_:
+      // The underlying channel was replaced.
+      // Just start reading from the new one.
+      return read
+    if not result: return result
+    if result is not ByteArray: throw result
     return result
 
   close -> none:
-    intercepted_bytes_.add [ "close", Time.monotonic_us ]
+    activity_.add [ "close", Time.monotonic_us ]
     wrapped_.close
 
   supports_reconnect -> bool:
+    return wrapped_.supports_reconnect
     return true
 
   reconnect -> none:
-    intercepted_bytes_.add [ "reconnect", Time.monotonic_us ]
+    activity_.add [ "reconnect", Time.monotonic_us ]
     wrapped_.reconnect
+    remaining_to_write_ = 0
+    start_reading_
 
   is_closed -> bool:
     return wrapped_.is_closed
 
   clear -> none:
-    intercepted_bytes_.clear
+    activity_.clear
 
-  packets -> List:
-    result := []
-    read_pipe := Pipe_
-    read_reader := reader.BufferedReader read_pipe
-    write_pipe := Pipe_
-    write_reader := reader.BufferedReader write_pipe
-
-    done := monitor.Semaphore
-    ns_for_packet /int? := null
-    task --background::
-      while packet := mqtt.Packet.deserialize read_reader:
-        result.add [ "read", packet, ns_for_packet ]
-      done.up
-    task --background::
-      while packet := mqtt.Packet.deserialize write_reader:
-        result.add [ "write", packet, ns_for_packet ]
-      done.up
-    intercepted_bytes_.do:
-      if it[0] == "read":
-        ns_for_packet = it[2]
-        read_pipe.write it[1]
-      else if it[0] == "write":
-        ns_for_packet = it[2]
-        write_pipe.write it[1]
-      else:
-        result.add it
-
-    read_pipe.close
-    write_pipe.close
-    done.down
-    done.down
-    return result
+  activity -> List:
+    return activity_

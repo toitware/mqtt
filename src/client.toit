@@ -220,6 +220,11 @@ abstract class DefaultReconnectionStrategyBase implements ReconnectionStrategy:
 
   is_closed_ := false
 
+  /**
+  A latch that is set when the client is sleeping before reconnecting.
+  */
+  waiting_for_reconnect_latch_ /monitor.Latch? := null
+
   constructor
       --receive_connect_timeout /Duration = DEFAULT_RECEIVE_CONNECT_TIMEOUT
       --attempt_delays /List /*Duration*/ = DEFAULT_ATTEMPT_DELAYS:
@@ -240,7 +245,24 @@ abstract class DefaultReconnectionStrategyBase implements ReconnectionStrategy:
     for i := -1; i < attempt_delays_.size; i++:
       if is_closed: return null
       if i >= 0:
-        sleep attempt_delays_[i]
+        // TODO(florian): we want to wait for `close` calls and `sleep` at the same
+        // time. Using a task and latch for this feels very expensive.
+        assert: waiting_for_reconnect_latch_ == null
+        waiting_for_reconnect_latch_ = monitor.Latch
+        sleeping_task := null
+        try:
+          sleeping_task = task::
+            sleep attempt_delays_[i]
+            sleeping_task = null
+            if waiting_for_reconnect_latch_ and not waiting_for_reconnect_latch_.has_value:
+              waiting_for_reconnect_latch_.set true
+
+          // As soon as the sleep is over, or there is a close, we get here.
+          waiting_for_reconnect_latch_.get
+        finally:
+          waiting_for_reconnect_latch_ = null
+          if sleeping_task: sleeping_task.cancel
+
         if is_closed: return null
         reconnect_transport.call
 
@@ -272,6 +294,8 @@ abstract class DefaultReconnectionStrategyBase implements ReconnectionStrategy:
 
   close -> none:
     is_closed_ = true
+    if waiting_for_reconnect_latch_ and not waiting_for_reconnect_latch_.has_value:
+      waiting_for_reconnect_latch_.set null
 
 
 class DefaultCleanSessionReconnectionStrategy extends DefaultReconnectionStrategyBase:
@@ -328,12 +352,6 @@ class DefaultSessionReconnectionStrategy extends DefaultReconnectionStrategyBase
 
   should_try_reconnect transport/ActivityMonitoringTransport -> bool:
     return transport.supports_reconnect
-
-  is_closed -> bool:
-    return is_closed_
-
-  close -> none:
-    is_closed_ = true
 
 /** An MQTT session. */
 class Session_:
@@ -587,7 +605,7 @@ class Client:
       handling_latch_.set true
       while true:
         packet /Packet? := null
-        catch --unwind=(: not state_ == STATE_DISCONNECTED_):
+        catch --unwind=(: not state_ == STATE_DISCONNECTED_ and not state_ == STATE_CLOSING_):
           do_connected_ --allow_disconnected: packet = connection_.read
 
         if not packet:
@@ -596,9 +614,10 @@ class Client:
           // In theory this could hide unexpected disconnects from the server, but it's
           // much more likely that we first disconnected, and then called $close for
           // another reason (like timeout).
-          if state_ != STATE_DISCONNECTED_ and state_ != STATE_CLOSED_:
+          if not is_closed:
             throw reader.UNEXPECTED_END_OF_READER_EXCEPTION
-          // Gracefully shut down.
+          // The user called 'close'. Doesn't mean it was always completely graceful, but
+          // good enough.
           break
 
         if packet is PublishPacket or packet is SubAckPacket or packet is UnsubAckPacket:
@@ -653,7 +672,7 @@ class Client:
   If the client has already sent a disconnect packet, or is closed, does nothing.
 
   Never tries to reconnect. If the connection is not alive when it's time to send the
-    disconnect packet, does nothing.
+    disconnect packet, closes the client as if called with $force.
 
   # Forced shutdown
   In the case of a forced shutdown, calls $Transport.close on the current transport.
@@ -681,14 +700,21 @@ class Client:
 
     state_ = STATE_DISCONNECTED_
 
+    // There might be an attempt of reconnecting in progress.
+    // By closing here, we make that attempt shorter (if it fails).
+    reconnection_strategy_.close
+
     sending_.do:
       if state_ == STATE_CLOSING_ or state_ == STATE_CLOSED_ : return
 
-      // This shouldn't be necessary, as we don't go through the $do_connected_ method.
-      reconnection_strategy_.close
-
-      if connection_.is_alive:
-        connection_.write DisconnectPacket
+      // Make sure we take the same lock as the reconnecting function.
+      // Otherwise we might not send a disconnect, even though we just reconnected (or are
+      // reconnecting).
+      connecting_.do:
+        if connection_.is_alive:
+          connection_.write DisconnectPacket
+        else:
+          close_force_
 
   /**
   Forcefully closes the client.
@@ -861,7 +887,6 @@ class Client:
       assert: exception != null
       if is_closed: throw CLIENT_CLOSED_EXCEPTION
       reconnect_ --is_initial_connection=false
-      if is_closed: throw CLIENT_CLOSED_EXCEPTION
 
   refused_reason_for_return_code_ return_code/int -> string:
     refused_reason := "CONNECTION_REFUSED"
@@ -905,8 +930,7 @@ class Client:
               connection_.write packet
             --receive_connect_ack = :
               response := connection_.read
-              if not response: throw "INTERNAL_ERROR"
-              if is_closed: throw CLIENT_CLOSED_EXCEPTION
+              if not response: throw "CONNECTION_CLOSED"
               ack := (response as ConnAckPacket)
               return_code := ack.return_code
               if return_code != 0:
@@ -918,7 +942,7 @@ class Client:
               ack.session_present
             --disconnect = :
               connection_.write DisconnectPacket
-      finally: | is_exception _ |
+      finally: | is_exception exception |
         if is_exception:
           close --force
 

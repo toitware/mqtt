@@ -164,6 +164,10 @@ class Session_:
       disconnect
       return
 
+    if packet is PubAckPacket:
+      id := (packet as PubAckPacket).packet_id
+      waiting_for_ack_.remove id
+
     logger_.warn "Unhandled packet $(Packet.debug_string_ packet)"
 
   subscribe packet/SubscribePacket:
@@ -304,6 +308,11 @@ class Broker:
         connection := Connection_ it
         exception := catch --trace:
           packet := connection.read
+          if not packet:
+            logger_.info "Connection was closed"
+            connection.close
+            continue.listen
+
           logger_.info "read packet $(Packet.debug_string_ packet)"
           if packet is not ConnectPacket:
             logger_.error "didn't receive connect packet, but got packet of type $packet.type"
