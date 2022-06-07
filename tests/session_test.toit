@@ -27,14 +27,14 @@ When the clean session flag is not given, then the old session should be found (
 test_clean_session create_transport/Lambda --logger/log.Logger:
   // First connection should be clean.
   with_packet_client create_transport
-      --logger=logger: | client/mqtt.Client wait_for_idle/Lambda clear/Lambda get_activity/Lambda |
+      --logger=logger: | client/mqtt.FullClient wait_for_idle/Lambda clear/Lambda get_activity/Lambda |
     activity := get_activity.call
     connect_ack /mqtt.ConnAckPacket := (activity.filter: it[0] == "read" and it[1] is mqtt.ConnAckPacket).first[1]
     expect_not connect_ack.session_present
 
   // Second connection should be clean too.
   with_packet_client create_transport
-      --logger=logger: | client/mqtt.Client wait_for_idle/Lambda clear/Lambda get_activity/Lambda |
+      --logger=logger: | client/mqtt.FullClient wait_for_idle/Lambda clear/Lambda get_activity/Lambda |
     activity := get_activity.call
     connect_ack /mqtt.ConnAckPacket := (activity.filter: it[0] == "read" and it[1] is mqtt.ConnAckPacket).first[1]
     expect_not connect_ack.session_present
@@ -42,7 +42,7 @@ test_clean_session create_transport/Lambda --logger/log.Logger:
   // Third connection should be clean, but we now connect without clean_session.
   with_packet_client create_transport
       --no-clean_session
-      --logger=logger: | client/mqtt.Client wait_for_idle/Lambda clear/Lambda get_activity/Lambda |
+      --logger=logger: | client/mqtt.FullClient wait_for_idle/Lambda clear/Lambda get_activity/Lambda |
     activity := get_activity.call
     connect_ack /mqtt.ConnAckPacket := (activity.filter: it[0] == "read" and it[1] is mqtt.ConnAckPacket).first[1]
     expect_not connect_ack.session_present
@@ -50,7 +50,7 @@ test_clean_session create_transport/Lambda --logger/log.Logger:
   // Now we should have a session.
   with_packet_client create_transport
       --no-clean_session
-      --logger=logger: | client/mqtt.Client wait_for_idle/Lambda clear/Lambda get_activity/Lambda |
+      --logger=logger: | client/mqtt.FullClient wait_for_idle/Lambda clear/Lambda get_activity/Lambda |
     activity := get_activity.call
     connect_ack /mqtt.ConnAckPacket := (activity.filter: it[0] == "read" and it[1] is mqtt.ConnAckPacket).first[1]
     expect connect_ack.session_present
@@ -58,7 +58,7 @@ test_clean_session create_transport/Lambda --logger/log.Logger:
   // Connecting again with a clean-session flag yields in no-session again.
   // Third connection should be clean, but we now connect without clean_session.
   with_packet_client create_transport
-      --logger=logger : | client/mqtt.Client wait_for_idle/Lambda clear/Lambda get_activity/Lambda |
+      --logger=logger : | client/mqtt.FullClient wait_for_idle/Lambda clear/Lambda get_activity/Lambda |
     activity := get_activity.call
     connect_ack /mqtt.ConnAckPacket := (activity.filter: it[0] == "read" and it[1] is mqtt.ConnAckPacket).first[1]
     expect_not connect_ack.session_present
@@ -71,19 +71,19 @@ This is the easiest way to see whether the broker keeps some state for the clien
 test_subscriptions create_transport/Lambda --logger/log.Logger:
   topic := "session-topic"
   with_packet_client create_transport
-      --device_id = "sub-client"
+      --client_id = "sub-client"
       --no-clean_session
-      --logger=logger: | client/mqtt.Client wait_for_idle/Lambda clear/Lambda get_activity/Lambda |
+      --logger=logger: | client/mqtt.FullClient wait_for_idle/Lambda clear/Lambda get_activity/Lambda |
     client.subscribe topic
 
   with_packet_client create_transport
       --logger = logger
-      --device_id = "other-client": | other_client/mqtt.Client other_wait_for_idle/Lambda _ _ |
+      --client_id = "other-client": | other_client/mqtt.FullClient other_wait_for_idle/Lambda _ _ |
 
     with_packet_client create_transport
-        --device_id = "sub-client"
+        --client_id = "sub-client"
         --no-clean_session
-        --logger=logger: | client/mqtt.Client wait_for_idle/Lambda clear/Lambda get_activity/Lambda |
+        --logger=logger: | client/mqtt.FullClient wait_for_idle/Lambda clear/Lambda get_activity/Lambda |
       client.subscribe topic
 
       wait_for_idle.call
@@ -109,13 +109,13 @@ test_subscriptions create_transport/Lambda --logger/log.Logger:
 Tests that the client resends messages when it hasn't received the broker's acks.
 */
 test_client_qos create_transport/Lambda --logger/log.Logger:
-  device_id := "test-client-qos"
+  client_id := "test-client-qos"
   topic := "test-resend"
 
   // Connect once to clear the session.
   with_packet_client create_transport
       --logger = logger
-      --device_id = device_id
+      --client_id = client_id
       --clean_session:
     null
 
@@ -143,11 +143,11 @@ test_client_qos create_transport/Lambda --logger/log.Logger:
     packet
 
   with_packet_client create_transport
-      --device_id = device_id
+      --client_id = client_id
       --read_filter = read_filter
       --write_filter = write_filter
       --no-clean_session
-      --logger=logger: | client/mqtt.Client wait_for_idle/Lambda clear/Lambda get_activity/Lambda |
+      --logger=logger: | client/mqtt.FullClient wait_for_idle/Lambda clear/Lambda get_activity/Lambda |
     assert: created_transport != null
 
     wait_for_idle.call
@@ -188,15 +188,15 @@ test_broker_qos create_transport/Lambda --logger/log.Logger:
   // Create a client that will send a message to the client we are testing.
   with_packet_client create_transport
       --clean_session
-      --logger=logger: | other_client/mqtt.Client _ _ _ |
+      --logger=logger: | other_client/mqtt.FullClient _ _ _ |
 
-    device_id := "test-broker-qos"
+    client_id := "test-broker-qos"
     topic := "test-resend"
 
     // Connect once to clear the session.
     with_packet_client create_transport
         --logger = logger
-        --device_id = device_id
+        --client_id = client_id
         --clean_session:
       null
 
@@ -220,10 +220,10 @@ test_broker_qos create_transport/Lambda --logger/log.Logger:
         packet
 
     with_packet_client create_transport
-        --device_id = device_id
+        --client_id = client_id
         --write_filter = write_filter
         --no-clean_session
-        --logger=logger: | client/mqtt.Client wait_for_idle/Lambda clear/Lambda get_activity/Lambda |
+        --logger=logger: | client/mqtt.FullClient wait_for_idle/Lambda clear/Lambda get_activity/Lambda |
       assert: created_transport != null
 
       client.subscribe topic

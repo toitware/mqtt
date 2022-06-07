@@ -8,7 +8,7 @@ import reader
 
 import mqtt.packets as mqtt
 import mqtt.last_will as mqtt
-import mqtt.topic_filter as mqtt
+import mqtt.topic_qos as mqtt
 
 PACKET_ID_TESTS ::= [
     0,
@@ -235,20 +235,20 @@ test_subscribe:
 
   TESTS.do: | test |
     packet_id := test["packet-id"]
-    topic_filter_values := test["filters"]
-    topic_filters := topic_filter_values.map: | values |
-      filter := values[0]
+    topic_qos_values := test["filters"]
+    topic_qoses := topic_qos_values.map: | values |
+      topic := values[0]
       max_qos := values[1]
-      mqtt.TopicFilter filter --max_qos=max_qos
-    subscribe := mqtt.SubscribePacket --packet_id=packet_id topic_filters
+      mqtt.TopicQos topic --max_qos=max_qos
+    subscribe := mqtt.SubscribePacket --packet_id=packet_id topic_qoses
     deserialized := (test_roundtrip subscribe) as mqtt.SubscribePacket
     expect_equals packet_id deserialized.packet_id
-    expect_equals topic_filter_values.size deserialized.topic_filters.size
-    topic_filter_values.size.repeat:
-      values := topic_filter_values[it]
-      topic_filter := deserialized.topic_filters[it]
-      expect_equals values[0] topic_filter.filter
-      expect_equals values[1] topic_filter.max_qos
+    expect_equals topic_qos_values.size deserialized.topics.size
+    topic_qos_values.size.repeat:
+      values := topic_qos_values[it]
+      topic_qos := deserialized.topics[it]
+      expect_equals values[0] topic_qos.topic
+      expect_equals values[1] topic_qos.max_qos
 
 test_suback:
   TESTS ::= [
@@ -297,12 +297,12 @@ test_unsubscribe:
 
   TESTS.do: | test |
     packet_id := test["packet-id"]
-    topic_filters := test["filters"]
-    unsubscribe := mqtt.UnsubscribePacket --packet_id=packet_id topic_filters
+    topics := test["filters"]
+    unsubscribe := mqtt.UnsubscribePacket --packet_id=packet_id topics
     deserialized := (test_roundtrip unsubscribe) as mqtt.UnsubscribePacket
     expect_equals packet_id deserialized.packet_id
-    expect_equals topic_filters.size deserialized.topic_filters.size
-    expect_equals topic_filters deserialized.topic_filters
+    expect_equals topics.size deserialized.topics.size
+    expect_equals topics deserialized.topics
 
 test_unsuback:
   PACKET_ID_TESTS.do: | packet_id |

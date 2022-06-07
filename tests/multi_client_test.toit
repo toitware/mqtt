@@ -25,12 +25,12 @@ test create_transport/Lambda --logger/log.Logger:
   keep_alive := Duration --s=10_000
 
   transport1 /mqtt.Transport := create_transport.call
-  client1 := mqtt.Client --transport=transport1 --logger=logger
+  client1 := mqtt.FullClient --transport=transport1 --logger=logger
   options1 := mqtt.SessionOptions --client_id="test_client1" --keep_alive=keep_alive --clean_session
   client1.connect --options=options1
 
   transport2 /mqtt.Transport := create_transport.call
-  client2 := mqtt.Client --transport=transport2 --logger=logger
+  client2 := mqtt.FullClient --transport=transport2 --logger=logger
   options2 := mqtt.SessionOptions --client_id="test_client2" --keep_alive=keep_alive --clean_session
   client2.connect --options=options2
 

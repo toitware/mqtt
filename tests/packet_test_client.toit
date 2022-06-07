@@ -15,7 +15,7 @@ Tests that the client and broker correctly ack packets.
 */
 with_packet_client create_transport/Lambda [block]
     --logger /log.Logger
-    --device_id/string = "test-client"
+    --client_id/string = "test-client"
     --clean_session /bool = true
     --keep_alive /Duration = (Duration --s=10_000) // Mosquitto doesn't support 0-duration keep-alives.
     --reconnection_strategy /mqtt.ReconnectionStrategy? = null
@@ -24,12 +24,12 @@ with_packet_client create_transport/Lambda [block]
     --write_filter /Lambda? = null:
   transport /mqtt.Transport := create_transport.call
   logging_transport := TestTransport transport --read_filter=read_filter --write_filter=write_filter
-  client := mqtt.Client --transport=logging_transport --logger=logger
+  client := mqtt.FullClient --transport=logging_transport --logger=logger
 
   // Mosquitto doesn't support zero-duration keep-alives.
   // Just set it to something really big.
   options := mqtt.SessionOptions
-      --client_id = device_id
+      --client_id = client_id
       --keep_alive = keep_alive
       --clean_session = clean_session
   client.connect --options=options --reconnection_strategy=reconnection_strategy

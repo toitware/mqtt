@@ -20,7 +20,7 @@ Tests that the client and broker correctly ack packets.
 test create_transport/Lambda --logger/log.Logger:
   topic := "test/retain"
   with_packet_client create_transport
-      --logger=logger : | client/mqtt.Client wait_for_idle/Lambda clear/Lambda get_activity/Lambda |
+      --logger=logger : | client/mqtt.FullClient wait_for_idle/Lambda clear/Lambda get_activity/Lambda |
 
     client.subscribe topic
     client.publish topic "test".to_byte_array
@@ -77,9 +77,9 @@ test create_transport/Lambda --logger/log.Logger:
     client.publish topic "available for other clients".to_byte_array --qos=0 --retain
 
     with_packet_client create_transport
-        --device_id = "other client"
+        --client_id = "other client"
         --logger = logger:
-      | client/mqtt.Client wait_for_idle/Lambda clear/Lambda get_activity/Lambda |
+      | client/mqtt.FullClient wait_for_idle/Lambda clear/Lambda get_activity/Lambda |
 
       clear.call
       client.subscribe topic
@@ -94,9 +94,9 @@ test create_transport/Lambda --logger/log.Logger:
 
   // The retained message stays even when the original sender has died.
   with_packet_client create_transport
-      --device_id = "third client"
+      --client_id = "third client"
       --logger = logger:
-    | client/mqtt.Client wait_for_idle/Lambda clear/Lambda get_activity/Lambda |
+    | client/mqtt.FullClient wait_for_idle/Lambda clear/Lambda get_activity/Lambda |
 
     clear.call
     client.subscribe topic

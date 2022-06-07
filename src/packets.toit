@@ -7,7 +7,7 @@ import binary
 import reader
 
 import .last_will
-import .topic_filter
+import .topic_qos
 
 abstract class Packet:
   type/int
@@ -132,8 +132,8 @@ abstract class Packet:
     else if packet is SubscribePacket:
       subscribe := packet as SubscribePacket
       result := "Subscribe($subscribe.packet_id)"
-      subscribe.topic_filters.do:
-        result += " $it.filter-$it.max_qos"
+      subscribe.topics.do: | topic_qos/TopicQos |
+        result += " $topic_qos.topic-$topic_qos.max_qos"
       return result
     else if packet is SubAckPacket:
       suback := packet as SubAckPacket
@@ -141,7 +141,7 @@ abstract class Packet:
     else if packet is UnsubscribePacket:
       unsubscribe := packet as UnsubscribePacket
       result := "Unsubscribe($unsubscribe.packet_id)"
-      unsubscribe.topic_filters.do:
+      unsubscribe.topics.do:
         result += " $it"
       return result
     else if packet is UnsubAckPacket:
@@ -330,23 +330,23 @@ class PubAckPacket extends Packet:
 class SubscribePacket extends Packet:
   static TYPE ::= 8
 
-  topic_filters/List/*<TopicFilter>*/
+  topics/List/*<TopicFilter>*/
   packet_id/int
 
-  constructor .topic_filters --.packet_id:
+  constructor .topics --.packet_id:
     super TYPE --flags=0b0010
 
   constructor.deserialize_ reader/reader.BufferedReader size/int:
     packet_id = Packet.decode_uint16 reader
     size -= 2
-    topic_filters = []
+    topics = []
     while size > 0:
       topic := Packet.decode_string reader
       size -= 2 + topic.size
       max_qos := reader.read_byte
       size--
-      topic_filter := TopicFilter topic --max_qos=max_qos
-      topic_filters.add topic_filter
+      topic_qos := TopicQos topic --max_qos=max_qos
+      topics.add topic_qos
     super TYPE --flags=0b0010
 
   variable_header -> ByteArray:
@@ -354,9 +354,9 @@ class SubscribePacket extends Packet:
 
   payload -> ByteArray:
     buffer := bytes.Buffer
-    topic_filters.do: | topic_filter/TopicFilter |
-      Packet.encode_string buffer topic_filter.filter
-      buffer.put_byte topic_filter.max_qos
+    topics.do: | topic_qos/TopicQos |
+      Packet.encode_string buffer topic_qos.topic
+      buffer.put_byte topic_qos.max_qos
     return buffer.bytes
 
 class SubAckPacket extends Packet:
@@ -385,20 +385,20 @@ class SubAckPacket extends Packet:
 class UnsubscribePacket extends Packet:
   static TYPE ::= 10
 
-  topic_filters/List/*<string>*/
+  topics/List/*<string>*/
   packet_id/int
 
   constructor.deserialize_ reader/reader.BufferedReader size/int:
     packet_id = Packet.decode_uint16 reader
     size -= 2
-    topic_filters = []
+    topics = []
     while size > 0:
       topic := Packet.decode_string reader
       size -= 2 + topic.size
-      topic_filters.add topic
+      topics.add topic
     super TYPE --flags=0b0010
 
-  constructor .topic_filters --.packet_id:
+  constructor .topics --.packet_id:
     super TYPE --flags=0b0010
 
   variable_header -> ByteArray:
@@ -406,8 +406,8 @@ class UnsubscribePacket extends Packet:
 
   payload -> ByteArray:
     buffer := bytes.Buffer
-    topic_filters.do: | topic_filter/string |
-      Packet.encode_string buffer topic_filter
+    topics.do: | topic_qos/string |
+      Packet.encode_string buffer topic_qos
     return buffer.bytes
 
 class UnsubAckPacket extends Packet:

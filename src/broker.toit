@@ -12,9 +12,9 @@ import reader
 import writer
 import log
 import .packets
-import .topic_tree_
 import .last_will
-import .topic_filter
+import .topic_qos
+import .topic_tree_
 
 interface BrokerTransport implements reader.Reader:
   write bytes/ByteArray -> int
@@ -103,7 +103,7 @@ class Session_:
 
     connection_ = connection
     reader_task_ = task::
-      exception := catch:
+      exception := catch --trace:
         while true:
           packet := null
           if keep_alive == (Duration --s=0):
@@ -174,39 +174,39 @@ class Session_:
     result_qos := []
     allow_plus := true
     last_was_plus := false
-    packet.topic_filters.do: | topic_filter/TopicFilter |
-      filter := topic_filter.filter
-      for i := 0; i < filter.size; i++:
-        char := filter[i]
+    packet.topics.do: | topic_qos/TopicQos |
+      topic := topic_qos.topic
+      for i := 0; i < topic.size; i++:
+        char := topic[i]
         if not char: continue  // Unicode character.
-        if last_was_plus and char != '/': throw "INVALID_SUBSCRIPTION: $filter"
+        if last_was_plus and char != '/': throw "INVALID_SUBSCRIPTION: $topic"
         if char == '+':
-          if not allow_plus: throw "INVALID_SUBSCRIPTION: $filter"
+          if not allow_plus: throw "INVALID_SUBSCRIPTION: $topic"
           else: last_was_plus = true
         else:
           last_was_plus = false
         allow_plus = char == '/'
 
-        if char == '#' and i != filter.size - 1:
-          throw "INVALID_SUBSCRIPTION: $filter"
+        if char == '#' and i != topic.size - 1:
+          throw "INVALID_SUBSCRIPTION: $topic"
 
-      if not 0 <= topic_filter.max_qos <= 2:
-        throw "INVALID_SUBSCRIPTION: $filter ($topic_filter.max_qos)"
+      if not 0 <= topic_qos.max_qos <= 2:
+        throw "INVALID_SUBSCRIPTION: $topic ($topic_qos.max_qos)"
 
-      accepted_qos := min topic_filter.max_qos 1
-      subscription_tree_.set filter accepted_qos
+      accepted_qos := min topic_qos.max_qos 1
+      subscription_tree_.set topic accepted_qos
       result_qos.add accepted_qos
     send_ (SubAckPacket --qos=result_qos --packet_id=packet.packet_id)
 
-    packet.topic_filters.do: | topic_filter/TopicFilter |
-      filter := topic_filter.filter
-      broker.retained.do filter --all: | retained/PublishPacket |
-        qos := min topic_filter.max_qos  retained.qos
+    packet.topics.do: | topic_qos/TopicQos |
+      topic := topic_qos.topic
+      broker.retained.do topic --all: | retained/PublishPacket |
+        qos := min topic_qos.max_qos  retained.qos
         packet_id := qos > 0 ? next_packet_id_++ : null
         send_ (retained.with --packet_id=packet_id --retain --qos=qos)
 
   unsubscribe packet/UnsubscribePacket:
-    packet.topic_filters.do: | topic |
+    packet.topics.do: | topic |
       existed := subscription_tree_.remove topic
       if not existed:
         logger_.info "client $client_id unsubscribed from non-existent topic $topic"

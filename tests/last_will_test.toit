@@ -36,7 +36,7 @@ test create_transport/Lambda --logger/log.Logger:
           "last_will_message $qos $retain".to_byte_array
       transport /mqtt.Transport := create_transport.call
       transports.add transport
-      client := mqtt.Client --transport=transport --logger=logger
+      client := mqtt.FullClient --transport=transport --logger=logger
       options := mqtt.SessionOptions --client_id="test_client $(id_counter++)"
           --keep_alive=keep_alive
           --clean_session
@@ -45,7 +45,7 @@ test create_transport/Lambda --logger/log.Logger:
       clients.add client
 
   receiver_transport /mqtt.Transport := create_transport.call
-  receiver_client := mqtt.Client --transport=receiver_transport --logger=logger
+  receiver_client := mqtt.FullClient --transport=receiver_transport --logger=logger
   receiver_options := mqtt.SessionOptions --client_id="receiver" --keep_alive=keep_alive --clean_session
   receiver_client.connect --options=receiver_options
 

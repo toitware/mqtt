@@ -21,7 +21,7 @@ Tests that the client and broker correctly ack packets.
 test create_transport/Lambda logger/log.Logger:
   with_packet_client create_transport
       --keep_alive = (Duration --s=1)
-      --logger=logger : | client/mqtt.Client _ _ get_activity/Lambda |
+      --logger=logger : | client/mqtt.FullClient _ _ get_activity/Lambda |
     sleep --ms=2_000
 
     activity := get_activity.call
@@ -37,7 +37,7 @@ According to the spec a 0 keep-alive, just means that there isn't any.
 test_no_timeout create_transport/Lambda logger/log.Logger:
   with_packet_client create_transport
       --keep_alive = Duration.ZERO
-      --logger=logger : | client/mqtt.Client _ _ get_activity/Lambda |
+      --logger=logger : | client/mqtt.FullClient _ _ get_activity/Lambda |
     sleep --ms=2_000
 
     activity := get_activity.call
@@ -88,7 +88,7 @@ test_slow_write create_transport/Lambda logger/log.Logger:
   keep_alive := Duration --s=1
   with_packet_client create_slow_transport
       --keep_alive = keep_alive
-      --logger=logger : | client/mqtt.Client wait_for_idle/Lambda _ get_activity/Lambda |
+      --logger=logger : | client/mqtt.FullClient wait_for_idle/Lambda _ get_activity/Lambda |
 
     start_time := Time.now
     slow_transport.should_write_slowly = true

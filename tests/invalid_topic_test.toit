@@ -29,7 +29,7 @@ PUBLISH_TESTS ::= [
 
 test_topic topic/string create_transport/Lambda --mode/string --logger/log.Logger:
   transport /mqtt.Transport := create_transport.call
-  client := mqtt.Client --transport=transport --logger=logger
+  client := mqtt.FullClient --transport=transport --logger=logger
 
   options := mqtt.SessionOptions --client_id="test_client"
   client.connect --options=options

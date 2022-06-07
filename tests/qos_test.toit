@@ -14,7 +14,7 @@ import .broker_internal
 import .broker_mosquitto
 import .transport
 
-test_publish client/mqtt.Client transport/TestTransport --auto_ack_enabled/bool --logger/log.Logger [--wait_for_idle]:
+test_publish client/mqtt.FullClient transport/TestTransport --auto_ack_enabled/bool --logger/log.Logger [--wait_for_idle]:
   2.repeat: | qos |
     transport.clear
     client.publish "foo/bar/gee" "bar".to_byte_array --qos=qos
@@ -33,7 +33,7 @@ test_publish client/mqtt.Client transport/TestTransport --auto_ack_enabled/bool 
       expect publish.packet_id == ack.packet_id
     // The other 2 packets are the idle packets.
 
-test_sub_unsub client/mqtt.Client transport/TestTransport --logger/log.Logger [--wait_for_idle]:
+test_sub_unsub client/mqtt.FullClient transport/TestTransport --logger/log.Logger [--wait_for_idle]:
   // Subscriptions always have qos=1.
   transport.clear
   client.subscribe "foo/bar"
@@ -62,7 +62,7 @@ test_sub_unsub client/mqtt.Client transport/TestTransport --logger/log.Logger [-
   expect unsubscribe.packet_id == unsub_ack.packet_id
   // The other 2 packets are the idle packets.
 
-test_max_qos client/mqtt.Client transport/TestTransport --logger/log.Logger [--wait_for_idle]:
+test_max_qos client/mqtt.FullClient transport/TestTransport --logger/log.Logger [--wait_for_idle]:
   2.repeat: | max_qos |
     topic := "foo/bar$max_qos"
     client.subscribe topic --max_qos=max_qos
@@ -106,7 +106,7 @@ Tests that the client and broker correctly ack packets.
 test create_transport/Lambda --logger/log.Logger:
   transport /mqtt.Transport := create_transport.call
   logging_transport := TestTransport transport
-  client := mqtt.Client --transport=logging_transport --logger=logger
+  client := mqtt.FullClient --transport=logging_transport --logger=logger
 
   // Mosquitto doesn't support zero-duration keep-alives.
   // Just set it to something really big.

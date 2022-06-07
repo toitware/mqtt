@@ -50,10 +50,10 @@ test_no_disconnect_packet create_transport/Lambda --logger/log.Logger:
   second_attempt_delay := Duration --s=10
   reconnection_strategy := mqtt.DefaultSessionReconnectionStrategy --attempt_delays=[ Duration.ZERO, second_attempt_delay ]
   with_packet_client create_failing_transport
-      --device_id = "disconnect-client1"
+      --client_id = "disconnect-client1"
       --no-clean_session
       --reconnection_strategy = reconnection_strategy
-      --logger=logger: | client/mqtt.Client wait_for_idle/Lambda clear/Lambda get_activity/Lambda |
+      --logger=logger: | client/mqtt.FullClient wait_for_idle/Lambda clear/Lambda get_activity/Lambda |
 
     reconnect_was_attempted := monitor.Latch
     failing_transport.on_reconnect = ::
@@ -119,10 +119,10 @@ test_reconnect_before_disconnect_packet create_transport/Lambda --logger/log.Log
 
   reconnection_strategy := mqtt.DefaultSessionReconnectionStrategy --attempt_delays=[ Duration.ZERO ]
   with_packet_client create_brittle_transport
-      --device_id = "disconnect-client1"
+      --client_id = "disconnect-client1"
       --no-clean_session
       --reconnection_strategy = reconnection_strategy
-      --logger=logger: | client/mqtt.Client wait_for_idle/Lambda clear/Lambda get_activity/Lambda |
+      --logger=logger: | client/mqtt.FullClient wait_for_idle/Lambda clear/Lambda get_activity/Lambda |
 
     reconnect_was_attempted := monitor.Latch
     is_destroyed := false
@@ -171,9 +171,10 @@ test_reconnect_before_disconnect_packet create_transport/Lambda --logger/log.Log
     expect_equals 1 (activity.filter: it[0] == "write" and it[1] is mqtt.DisconnectPacket).size
 
 close_in_handle create_transport/Lambda --logger/log.Logger --force/bool:
-  client := mqtt.Client --transport=create_transport.call --logger=logger
+  client := mqtt.FullClient --transport=create_transport.call --logger=logger
 
-  client.connect --client_id="close_in-handle"
+  options := mqtt.SessionOptions --client_id="close_in_handle"
+  client.connect --options=options
 
   handle_done := monitor.Latch
   task::

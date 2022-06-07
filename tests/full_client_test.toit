@@ -14,7 +14,7 @@ import .broker_internal
 import .broker_mosquitto
 import .transport
 
-test_pubsub client/mqtt.Client callbacks/Map --logger/log.Logger:
+test_pubsub client/mqtt.FullClient callbacks/Map --logger/log.Logger:
   2.repeat: | qos |
     TESTS ::= [
       "foo",
@@ -76,7 +76,7 @@ test_pubsub client/mqtt.Client callbacks/Map --logger/log.Logger:
   client.publish topic "message".to_byte_array
   got_response.get
 
-test_multisub client/mqtt.Client callbacks/Map --logger/log.Logger:
+test_multisub client/mqtt.FullClient callbacks/Map --logger/log.Logger:
   client.subscribe "idle"
   2.repeat: | max_qos |
     logger.info "Testing multi-subscription with max-qos=$max_qos"
@@ -101,7 +101,7 @@ test_multisub client/mqtt.Client callbacks/Map --logger/log.Logger:
         seen_not_bar = true
 
     client.subscribe_all
-        TOPICS.map: mqtt.TopicFilter it --max_qos=max_qos
+        TOPICS.map: mqtt.TopicQos it --max_qos=max_qos
 
     client.publish "foo/bar/gee" "not bar".to_byte_array --qos=1
     client.publish "foo/bar/gee" "bar".to_byte_array --qos=1
@@ -112,7 +112,7 @@ test_multisub client/mqtt.Client callbacks/Map --logger/log.Logger:
 
 test create_transport/Lambda --logger/log.Logger:
   transport /mqtt.Transport := create_transport.call
-  client := mqtt.Client --transport=transport --logger=logger
+  client := mqtt.FullClient --transport=transport --logger=logger
 
   options := mqtt.SessionOptions --client_id="test_client"
   client.connect --options=options
