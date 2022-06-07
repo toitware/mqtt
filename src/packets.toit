@@ -153,6 +153,8 @@ abstract class Packet:
     else:
       return "Packet of type $packet.type"
 
+  stringify -> string: return debug_string_ this
+
 class ConnectPacket extends Packet:
   static TYPE ::= 1
 

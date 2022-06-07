@@ -67,40 +67,62 @@ test_clean_session create_transport/Lambda --logger/log.Logger:
 Tests that the subscriptions are remembered when the broker has a session for the client.
 
 This is the easiest way to see whether the broker keeps some state for the client.
+
+Also test that messages to subscription are buffered when the client isn't connected.
 */
 test_subscriptions create_transport/Lambda --logger/log.Logger:
   topic := "session-topic"
+
+  // Clear the sub-client session.
+  with_packet_client create_transport
+      --client_id = "sub-client"
+      --clean_session
+      --logger=logger: | client/mqtt.FullClient wait_for_idle/Lambda clear/Lambda get_activity/Lambda |
+    null
+
   with_packet_client create_transport
       --client_id = "sub-client"
       --no-clean_session
       --logger=logger: | client/mqtt.FullClient wait_for_idle/Lambda clear/Lambda get_activity/Lambda |
+
+    // Subscribe to topic, and then immediately close the connection.
     client.subscribe topic
+    wait_for_idle.call
 
   with_packet_client create_transport
       --logger = logger
-      --client_id = "other-client": | other_client/mqtt.FullClient other_wait_for_idle/Lambda _ _ |
+      --client_id = "other-client": | other_client/mqtt.FullClient _ _ _ |
+
+    // This message is sent when the client is not alive.
+    // The broker's session will cache it and send it when the client reconnects.
+    other_client.publish topic "hello0".to_byte_array --qos=1
 
     with_packet_client create_transport
         --client_id = "sub-client"
         --no-clean_session
         --logger=logger: | client/mqtt.FullClient wait_for_idle/Lambda clear/Lambda get_activity/Lambda |
-      client.subscribe topic
 
       wait_for_idle.call
+      activity := get_activity.call
+      messages := activity.filter: it[0] == "read" and it[1] is mqtt.PublishPacket
+      message := messages.first[1]
+      expect_equals topic message.topic
+      expect_equals "hello0" message.payload.to_string
+
       clear.call
 
-      other_client.publish topic "hello".to_byte_array --qos=0
+      other_client.publish topic "hello1".to_byte_array --qos=0
 
       saw_message := false
       for i := 0; i < 5; i++:
-        activity := get_activity.call
-        messages := activity.filter: it[0] == "read" and it[1] is mqtt.PublishPacket
+        activity = get_activity.call
+        messages = activity.filter: it[0] == "read" and it[1] is mqtt.PublishPacket
         if messages.is_empty:
           sleep --ms=(100 * i)
           continue
-        message := messages.first[1]
+        message = messages.first[1]
         expect_equals topic message.topic
-        expect_equals "hello" message.payload.to_string
+        expect_equals "hello1" message.payload.to_string
         saw_message = true
         break
       expect saw_message

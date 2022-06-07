@@ -260,7 +260,6 @@ class Session_:
     queued_.add_ack ack
 
   dispatch_incoming_publish packet/PublishPacket:
-    if state_ == STATE_DISCONNECTED_: return
     // There doesn't seem to be a rule which qos we should use if multiple
     // subscriptions match. We thus use the one from the most specialized.
     subscription_tree_.do --most_specialized packet.topic: | subscription_max_qos |

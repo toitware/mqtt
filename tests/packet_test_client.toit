@@ -39,8 +39,9 @@ with_packet_client create_transport/Lambda [block]
   // it should be quite stable.
   idle := monitor.Semaphore
 
+  idle_topic := "idle-$client_id-$random"
   wait_for_idle := ::
-    client.publish "idle" #[] --qos=0
+    client.publish idle_topic #[] --qos=0
     idle.down
 
   task::
@@ -49,14 +50,14 @@ with_packet_client create_transport/Lambda [block]
         logger.info "Received $(mqtt.Packet.debug_string_ packet)"
         if packet is mqtt.PublishPacket:
           client.ack packet
-          if (packet as mqtt.PublishPacket).topic == "idle": idle.up
+          if (packet as mqtt.PublishPacket).topic == idle_topic: idle.up
 
       logger.info "client shut down"
     if exception:
       on_handle_error.call exception
 
   client.when_running:
-    client.subscribe "idle" --max_qos=0
+    client.subscribe idle_topic --max_qos=0
     wait_for_idle.call
 
   block.call client

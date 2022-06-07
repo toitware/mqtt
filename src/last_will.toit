@@ -2,7 +2,7 @@
 // Use of this source code is governed by an MIT-style license that can be
 // found in the LICENSE file.
 
-import .client // For toitdoc.
+import .full_client // For toitdoc.
 
 /**
 A last will.
@@ -19,7 +19,7 @@ class LastWill:
   Constructs the configuration of a last-will message.
 
   The parameters $topic, $payload, $qos and $retain have the same
-    meaning as for $Client.publish, and are used when the last-will message
+    meaning as for $FullClient.publish, and are used when the last-will message
     is eventually sent.
   */
   constructor .topic .payload --.qos --.retain=false:

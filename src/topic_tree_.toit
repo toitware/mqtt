@@ -15,6 +15,9 @@ A tree of topics-segments, matching a topic to a value.
 class TopicTree:
   root_ /TopicTreeNode_ := TopicTreeNode_ "ignored_root"
 
+  is_empty -> bool:
+    return root_.children.is_empty
+
   /**
   Inserts, or replaces the value for the given topic.
 
@@ -57,6 +60,18 @@ class TopicTree:
       node.value_ = null
 
     return result
+
+  /**
+  Calls $block for each topic and entry.
+  */
+  do [block] -> none:
+    root_.children.do: | topic_level/string node/TopicTreeNode_ |
+      do_all_ topic_level node block
+
+  do_all_ prefix/string node/TopicTreeNode_ [block] -> none:
+    if node.value_: block.call prefix node.value_
+    node.children.do: | topic_level/string child/TopicTreeNode_ |
+      do_all_ "$prefix/$topic_level" child block
 
   /**
   Calls $block on the most specialized entry that matches the given $topic.

@@ -19,7 +19,7 @@ class CallbackEntry_:
 
   constructor .callback .max_qos:
 
-class Router:
+class Client:
   client_ /FullClient
 
   subscription_callbacks_ /TopicTree := TopicTree
@@ -30,42 +30,25 @@ class Router:
 
   The $transport parameter is used to send messages and is usually a TCP socket instance.
     See $TcpTransport.
+
+  The $routes must be a map from topic (of type $string) to callback. After the client started, it
+    will automatically subscribe to all topics in the map (with a max-qos of 1). If the broker has
+    already a session for this client (which can only happen if the $SessionOptions.clean_session flag
+    is not set), then the client might receive messages for these topics before there was any time to
+    call $subscribe, which is why it's a good idea to set the routes in the constructor.
   */
-  // TODO(florian): we must be able to set callback handlers before we start the client.
-  // Otherwise we will have "Received packet for unregister topics.".
   constructor
       --transport /Transport
-      --logger /log.Logger? = log.default:
+      --logger /log.Logger? = log.default
+      --routes /Map = {:}:
     logger_ = logger
     client_ = FullClient --transport=transport --logger=logger
+    routes.do: | topic/string callback/Lambda |
+      max_qos := 1
+      subscription_callbacks_.set topic (CallbackEntry_ callback max_qos)
 
   /**
-  Variant of $(start --attached --session_options).
-
-  Starts the client with default options.
-  If $client_id is given, uses it as the client ID. Otherwise, changes the
-    'clean_session' flag of the options to true, and lets the broker chose a
-    fresh client ID.
-  */
-  start -> none
-      --attached /bool
-      --client_id /string = ""
-      --catch_all_callback /Lambda? = null:
-    if not attached: throw "INVALID_ARGUMENT"
-    clean_session := client_id == ""
-    options := SessionOptions --client_id=client_id --clean_session=clean_session
-    start --attached --session_options=options --catch_all_callback=catch_all_callback
-
-  start -> none
-      --attached /bool
-      --session_options /SessionOptions
-      --catch_all_callback /Lambda? = null:
-    if not attached: throw "INVALID_ARGUMENT"
-    client_.connect --options=session_options
-    client_.handle: handle_packet_ it --catch_all_callback=catch_all_callback
-
-  /**
-  Variant of $(start --detached --session_options).
+  Variant of $(start --options).
 
   Starts the client with default session options.
   If $client_id is given, uses it as the client ID. Otherwise, changes the
@@ -73,33 +56,36 @@ class Router:
     fresh client ID.
   */
   start -> none
-      --detached /bool
       --client_id /string = ""
-      --background /bool=false
-      --on_error /Lambda=(:: throw it)
+      --background /bool = false
+      --on_error /Lambda = (:: throw it)
       --catch_all_callback /Lambda? = null:
-    if not detached: throw "INVALID_ARGUMENT"
     clean_session := client_id == ""
     options := SessionOptions --client_id=client_id --clean_session=clean_session
-    start --detached
-        --session_options=options
+    start --options=options
         --background=background
         --on_error=on_error
         --catch_all_callback=catch_all_callback
 
   start -> none
-      --detached /bool
-      --session_options /SessionOptions
+      --options /SessionOptions
       --background /bool = false
       --on_error /Lambda = (:: throw it)
       --catch_all_callback /Lambda? = null:
-    if not detached: throw "INVALID_ARGUMENT"
-    client_.connect --options=session_options
+    client_.connect --options=options
     task --background=background::
       exception := catch --trace:
         client_.handle: handle_packet_ it --catch_all_callback=catch_all_callback
       if exception: on_error.call exception
-    client_.when_running: return
+    client_.when_running:
+      subscribe_all_callbacks_
+
+  /**
+  Subscribes to all callbacks in the topic tree.
+  */
+  subscribe_all_callbacks_ -> none:
+    subscription_callbacks_.do: | topic/string callback_entry/CallbackEntry_ |
+      subscribe topic callback_entry.callback --max_qos=callback_entry.max_qos
 
   handle_packet_ packet/Packet --catch_all_callback/Lambda?:
     // We ack the packet as soon as we call the registered callback.
@@ -152,6 +138,8 @@ class Router:
     wants to receive.
 
   See $publish for an explanation of the different QoS values.
+
+  The $callback will be called with the topic and the payload of received messages.
   */
   subscribe topic/string --max_qos/int=1 callback/Lambda:
     topics := [ TopicQos topic --max_qos=max_qos ]
@@ -192,5 +180,5 @@ class Router:
     topics.do:
       subscription_callbacks_.remove it
 
-  close -> none:
-    client_.close
+  close --force/bool=false -> none:
+    client_.close --force=force
