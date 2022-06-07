@@ -24,6 +24,7 @@ SUBSCRIPTION_TESTS ::= [
 PUBLISH_TESTS ::= [
   "#",
   "+/foo",
+  "",
 ]
 
 test_topic topic/string create_transport/Lambda --mode/string --logger/log.Logger:

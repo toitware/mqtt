@@ -170,12 +170,34 @@ test_reconnect_before_disconnect_packet create_transport/Lambda --logger/log.Log
     // Since we connected, we also sent a disconnect packet.
     expect_equals 1 (activity.filter: it[0] == "write" and it[1] is mqtt.DisconnectPacket).size
 
+close_in_handle create_transport/Lambda --logger/log.Logger --force/bool:
+  client := mqtt.Client --transport=create_transport.call --logger=logger
+
+  client.connect --client_id="close_in-handle"
+
+  handle_done := monitor.Latch
+  task::
+    client.handle: | packet |
+      if packet is mqtt.PublishPacket:
+        publish := packet as mqtt.PublishPacket
+        if publish.topic == "disconnect":
+          client.close --force=force
+    handle_done.set true
+
+  client.when_running:
+    client.subscribe "disconnect"
+    client.publish "disconnect" #[] --qos=0
+
+  handle_done.get
+
 /**
 Tests the client's close function.
 */
 test create_transport/Lambda --logger/log.Logger:
-  // test_no_disconnect_packet create_transport --logger=logger
+  test_no_disconnect_packet create_transport --logger=logger
   test_reconnect_before_disconnect_packet create_transport --logger=logger
+  close_in_handle create_transport --logger=logger --no-force
+  close_in_handle create_transport --logger=logger --force
 
 main:
   log_level := log.ERROR_LEVEL

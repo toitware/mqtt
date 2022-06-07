@@ -58,6 +58,24 @@ test_pubsub client/mqtt.Client callbacks/Map --logger/log.Logger:
       client.unsubscribe subscription
       callbacks.remove topic
 
+  // Test sending a message in the handle function.
+  topic := "in_handle"
+  response_topic := "response_topic"
+  client.subscribe topic
+  client.subscribe response_topic
+
+  callbacks[topic] = :: | packet/mqtt.PublishPacket |
+    client.publish response_topic "response".to_byte_array
+
+  got_response := monitor.Latch
+  callbacks[response_topic] = :: | packet/mqtt.PublishPacket |
+    client.unsubscribe topic
+    client.unsubscribe response_topic
+    got_response.set true
+
+  client.publish topic "message".to_byte_array
+  got_response.get
+
 test_multisub client/mqtt.Client callbacks/Map --logger/log.Logger:
   client.subscribe "idle"
   2.repeat: | max_qos |
@@ -114,8 +132,6 @@ test create_transport/Lambda --logger/log.Logger:
     test_pubsub client callbacks --logger=logger
     test_multisub client callbacks --logger=logger
 
-  // TODO(florian): why is this sometimes necessary?
-  sleep --ms=10
   client.close
 
 main:

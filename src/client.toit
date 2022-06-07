@@ -569,6 +569,14 @@ class Client:
     // The client is only active once $handle has been called.
     if not is_running: throw "INVALID_STATE"
 
+  /**
+  Variant of $(connect --options).
+
+  Uses default options and the given $client_id.
+  */
+  connect --client_id/string -> none:
+    connect --options=(SessionOptions --client_id=client_id)
+
   connect -> none
       --options /SessionOptions
       --reconnection_strategy /ReconnectionStrategy? = null:

@@ -1,8 +1,0 @@
-Tests:
-- start connecting, then close the connection (with 'close') while CONNECTING is still active.
-
-- transport block at first write (throw in 'write' of transport.)
-
-- close client from within a handle.
-
-- empty topic publish throws

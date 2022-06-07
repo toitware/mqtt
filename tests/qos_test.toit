@@ -150,8 +150,6 @@ test create_transport/Lambda --logger/log.Logger:
   test_sub_unsub client logging_transport --logger=logger --wait_for_idle=wait_for_idle
   test_max_qos client logging_transport --logger=logger --wait_for_idle=wait_for_idle
 
-  // TODO(florian): this shouldn't be necessary.
-  sleep --ms=100
   client.close
 
 main:
