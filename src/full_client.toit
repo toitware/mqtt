@@ -1,4 +1,4 @@
-// Copyright (C) 2021 Toitware ApS. All rights reserved.
+// Copyright (C) 2022 Toitware ApS. All rights reserved.
 // Use of this source code is governed by an MIT-style license that can be
 // found in the LICENSE file.
 
@@ -207,6 +207,9 @@ interface ReconnectionStrategy:
   /** Closes the strategy, indicating that no further reconnection attempts should be done. */
   close -> none
 
+/**
+A base class for reconnection strategies.
+*/
 abstract class DefaultReconnectionStrategyBase implements ReconnectionStrategy:
   static DEFAULT_RECEIVE_CONNECT_TIMEOUT /Duration ::= Duration --s=5
   static DEFAULT_ATTEMPT_DELAYS /List ::= [
@@ -298,6 +301,14 @@ abstract class DefaultReconnectionStrategyBase implements ReconnectionStrategy:
       waiting_for_reconnect_latch_.set null
 
 
+/**
+The default reconnection strategy for clients that are connected with the
+  clean session bit.
+
+Since the broker will drop the session information this strategy won't reconnect
+  when the connection breaks after it has connected. However, it will potentially
+  try to connect multiple times for the initial connection.
+*/
 class DefaultCleanSessionReconnectionStrategy extends DefaultReconnectionStrategyBase:
 
   constructor
@@ -325,6 +336,12 @@ class DefaultCleanSessionReconnectionStrategy extends DefaultReconnectionStrateg
   should_try_reconnect transport/ActivityMonitoringTransport -> bool:
     return false
 
+/**
+The default reconnection strategy for clients that are connected without the
+  clean session bit.
+
+If the connection drops, the client tries to reconnect potentially multiple times.
+*/
 class DefaultSessionReconnectionStrategy extends DefaultReconnectionStrategyBase:
   constructor
       --receive_connect_timeout /Duration = DefaultReconnectionStrategyBase.DEFAULT_RECEIVE_CONNECT_TIMEOUT
@@ -395,16 +412,28 @@ This is also true if the client tries to connect reusing an existing session, bu
   messages.
 */
 interface PersistenceStore:
+  /**
+  Stores the publish-packet information in the persistent store.
+  Returns a persistent-store id which can be used to $get or $remove the data
+    from the store.
+  */
   store topic/string payload/ByteArray --retain/bool -> int
 
   /**
-  Finds the persistent packet with $packet_id and calls the given $block.
+  Finds the persistent packet with $persistent_id and calls the given $block
+    with arguments topic, payload and retain (in that order).
 
   The store may decide not to resend a packet, in which case it calls
-    $if_absent with the $packet_id.
+    $if_absent with the $persistent_id.
   */
-  get packet_id/int [block] [--if_absent] -> none
-  remove packet_id/int -> none
+  get persistent_id/int [block] [--if_absent] -> none
+
+  /**
+  Removes the data for the packet with $persistent_id.
+  Does nothing if there is no data associated to $persistent_id.
+  */
+  remove persistent_id/int -> none
+
   /**
   Calls the given block for each stored packet.
 
@@ -423,6 +452,9 @@ class PersistentPacket_:
 
   constructor .topic .payload --.retain:
 
+/**
+A persistence store that stores the packets in memory.
+*/
 class MemoryPersistenceStore implements PersistenceStore:
   storage_ /Map := {:}
   id_ /int := 0
@@ -432,15 +464,15 @@ class MemoryPersistenceStore implements PersistenceStore:
     storage_[id] = PersistentPacket_ topic payload --retain=retain
     return id
 
-  get packet_id/int [block] [--if_absent] -> none:
-    stored := storage_.get packet_id
+  get persistent_id/int [block] [--if_absent] -> none:
+    stored := storage_.get persistent_id
     if stored:
       block.call stored.topic stored.payload stored.retain
     else:
-      if_absent.call packet_id
+      if_absent.call persistent_id
 
-  remove packet_id/int -> none:
-    storage_.remove packet_id
+  remove persistent_id/int -> none:
+    storage_.remove persistent_id
 
   /**
   Calls the given block for each stored packet.
@@ -569,6 +601,12 @@ class FullClient:
     // The client is only active once $handle has been called.
     if not is_running: throw "INVALID_STATE"
 
+  /**
+  Connects the client to the broker.
+
+  Once the client is connected, the user should call $handle to handle incoming
+    packets. Only, when the handler is active, can messages be sent.
+  */
   connect -> none
       --options /SessionOptions
       --reconnection_strategy /ReconnectionStrategy? = null:
@@ -596,6 +634,8 @@ class FullClient:
 
   The given $on_packet block is called for each received packet.
     The block should $ack the packet as soon as possible.
+
+  The $when_running method executes a given block when this method is running.
   */
   handle [on_packet] -> none:
     if state_ != STATE_CONNECTED_: throw "INVALID_STATE"
@@ -696,8 +736,6 @@ class FullClient:
   disconnect_ -> none:
     if state_ == STATE_DISCONNECTED_: return
 
-    check_allowed_to_send_
-
     state_ = STATE_DISCONNECTED_
 
     // There might be an attempt of reconnecting in progress.
@@ -784,6 +822,11 @@ class FullClient:
           if qos == 1:
             session_.set_pending_ack --packet_id=packet_id --persistent_id=persistent_id
 
+  /**
+  Sends a $PublishPacket with the given $topic, $payload, $qos and $retain.
+
+  If $qos is 1, then allocates a packet id and returns it.
+  */
   send_publish_ topic/string payload/ByteArray --qos/int --retain/bool -> int?:
     if qos != 0 and qos != 1: throw "INVALID_ARGUMENT"
 
@@ -870,6 +913,11 @@ class FullClient:
         // This way ack-packets are transmitted faster.
         do_connected_: connection_.write ack
 
+  /**
+  Sends the given $packet.
+
+  Takes a lock and hands the packet to the connection.
+  */
   send_ packet/Packet -> none:
     if packet is ConnectPacket: throw "INVALID_PACKET"
     check_allowed_to_send_
@@ -878,6 +926,14 @@ class FullClient:
       if is_closed: throw CLIENT_CLOSED_EXCEPTION
       do_connected_: connection_.write packet
 
+  /**
+  Runs the given $block in a connected state.
+
+  If necessary reconnects the client.
+
+  If $allow_disconnected is true, then the client may also be in a disconnected (but
+    not closed) state.
+  */
   do_connected_ --allow_disconnected/bool=false [block]:
     if is_closed and not (allow_disconnected and state_ == STATE_DISCONNECTED_): throw CLIENT_CLOSED_EXCEPTION
     while true:
@@ -908,6 +964,11 @@ class FullClient:
       refused_reason = "NOT_AUTHORIZED"
     return refused_reason
 
+  /**
+  Connects (or reconnects) to the broker.
+
+  Uses the reconnection_strategy to do the actual connecting.
+  */
   reconnect_ --is_initial_connection/bool -> none:
     assert: not connection_ or not connection_.is_alive
     old_connection := connection_
