@@ -500,7 +500,7 @@ class FullClient:
   state_ /int := STATE_CREATED_
 
   transport_ /ActivityMonitoringTransport := ?
-  logger_ /log.Logger?
+  logger_ /log.Logger
 
   session_ /Session_? := null
   reconnection_strategy_ /ReconnectionStrategy? := null
@@ -512,8 +512,7 @@ class FullClient:
   Latch that is set when the $handle method is run. This indicates that the
     client is running.
 
-  Note that we allow to read the latch multiple times (which is currently not
-    allowed according to its documentation).
+  Note that we allow to read the latch multiple times.
   */
   handling_latch_ /monitor.Latch := monitor.Latch
 
@@ -554,7 +553,7 @@ class FullClient:
   */
   constructor
       --transport /Transport
-      --logger /log.Logger?
+      --logger /log.Logger = log.default
       --persistence_store /PersistenceStore? = null:
     transport_ = ActivityMonitoringTransport.private_(transport)
     logger_ = logger
@@ -629,7 +628,7 @@ class FullClient:
           finally:
             unacked_packet_ = null
         else if packet is ConnAckPacket:
-          if logger_: logger_.info "spurious conn-ack packet"
+          logger_.info "spurious conn-ack packet"
         else if packet is PingRespPacket:
           // Ignore.
         else if packet is PubAckPacket:
@@ -642,7 +641,7 @@ class FullClient:
               --if_absent=: logger_.info "unmatched packet id: $id"
           if persistence_id: persistence_store.remove persistence_id
         else:
-          if logger_: logger_.info "unexpected packet of type $packet.type"
+          logger_.info "unexpected packet of type $packet.type"
     finally:
       tear_down_
 
@@ -854,19 +853,18 @@ class FullClient:
 
   If the packet has qos=1, sends an ack packet to the broker.
 
-  If the client isn't running, does nothing.
+  If the client is closed, does nothing.
   */
   ack packet/Packet:
     if unacked_packet_ == packet: unacked_packet_ = null
 
-    // Can't ack if we don't have a connection anymore.
-    // Don't use $is_closed, as we are allowed to send acks after a $disconnect.
-    if state_ == STATE_CLOSING_ or state_ == STATE_CLOSED_: return
-    if state_ != STATE_HANDLING_ and state_ != STATE_DISCONNECTED_: throw "INVALID_STATE"
-    check_allowed_to_send_
+    if is_closed: return
+    if state_ != STATE_HANDLING_: throw "INVALID_STATE"
+
     if packet is PublishPacket:
       id := (packet as PublishPacket).packet_id
       if id:
+        check_allowed_to_send_
         ack := PubAckPacket --packet_id=id
         // Skip the 'sending_' queue and write directly to the connection.
         // This way ack-packets are transmitted faster.

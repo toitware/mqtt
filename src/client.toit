@@ -15,7 +15,6 @@ import .topic_tree_
 class CallbackEntry_:
   callback /Lambda
   max_qos /int
-  is_subscribed /bool := true
 
   constructor .callback .max_qos:
 
@@ -23,7 +22,7 @@ class Client:
   client_ /FullClient
 
   subscription_callbacks_ /TopicTree := TopicTree
-  logger_ /log.Logger?
+  logger_ /log.Logger
 
   /**
   Constructs a new routing MQTT client.
@@ -39,7 +38,7 @@ class Client:
   */
   constructor
       --transport /Transport
-      --logger /log.Logger? = log.default
+      --logger /log.Logger = log.default
       --routes /Map = {:}:
     logger_ = logger
     client_ = FullClient --transport=transport --logger=logger
@@ -140,19 +139,15 @@ class Client:
   See $publish for an explanation of the different QoS values.
 
   The $callback will be called with the topic and the payload of received messages.
+
+  If the client is already connected, still sends another request to the broker to
+    subscribe to the topic. This can be useful to obtain retained packets.
   */
   subscribe topic/string --max_qos/int=1 callback/Lambda:
     topics := [ TopicQos topic --max_qos=max_qos ]
     if topics.is_empty: throw "INVALID_ARGUMENT"
-
     callback_entry := CallbackEntry_ callback max_qos
-    old_entry := subscription_callbacks_.set topic callback_entry
-    if old_entry:
-      old_entry.is_subscribed = false
-      if old_entry.max_qos == max_qos:
-      // Just a simple change of callback.
-      return
-
+    subscription_callbacks_.set topic callback_entry
     client_.subscribe_all topics
 
   /**
