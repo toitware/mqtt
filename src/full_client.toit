@@ -325,11 +325,48 @@ interface PersistenceStore:
   */
   do [block] -> none
 
+class PersistentPacket_:
+  topic /string
+  payload /ByteArray
+  retain /bool
+
+  constructor .topic .payload --.retain:
+
 /**
 A persistence store that stores the packets in memory.
 */
 class MemoryPersistenceStore implements PersistenceStore:
-  UNIMPLEMENTED ::= "UNIMPLEMENTED"
+  storage_ /Map := {:}
+  id_ /int := 0
+
+  store topic/string payload/ByteArray --retain/bool -> int:
+    id := id_++
+    storage_[id] = PersistentPacket_ topic payload --retain=retain
+    return id
+
+  get persistent_id/int [block] [--if_absent] -> none:
+    stored := storage_.get persistent_id
+    if stored:
+      block.call stored.topic stored.payload stored.retain
+    else:
+      if_absent.call persistent_id
+
+  remove persistent_id/int -> none:
+    storage_.remove persistent_id
+
+  /**
+  Calls the given block for each stored packet.
+
+  The arguments to the block are:
+  - the persistent id
+  - the topic
+  - the payload
+  - the retain flag
+  */
+  do [block] -> none:
+    storage_.do: | id/int packet/PersistentPacket_ |
+      block.call id packet.topic packet.payload packet.retain
+
 
 /**
 An MQTT client.
