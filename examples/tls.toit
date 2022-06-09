@@ -7,21 +7,22 @@ import net
 import tls
 import net.x509
 
+HOST ::= "127.0.0.1"
+PORT ::= 8883
+
+CLIENT_ID ::= "toit-client-id"
+
 main:
-  socket := net.open.tcp_connect "127.0.0.1" 8883
+  transport := mqtt.TcpTransport.tls net.open --host=HOST --port=PORT
+    --root_certificates=[SERVER_CERTIFICATE]
 
-  tls := tls.Socket.client socket
-    --root_certificates=[SERVER_CERT]
+  client := mqtt.Client --transport=transport
 
-  tls.handshake
-
-  client := mqtt.Client
-    "toit-client-id"
-    mqtt.TcpTransport tls
-
+  client.start --client_id=CLIENT_ID
   print "connected to broker"
 
-SERVER_CERT := x509.Certificate.parse """\
+
+SERVER_CERTIFICATE := x509.Certificate.parse """\
 -----BEGIN CERTIFICATE-----
 
 <- insert server cert ->
