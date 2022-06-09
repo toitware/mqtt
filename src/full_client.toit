@@ -17,6 +17,49 @@ import .transport
 CLIENT_CLOSED_EXCEPTION ::= "CLIENT_CLOSED"
 
 /**
+A class that ensures that the connection to the broker is kept alive.
+
+When necessary sends ping packets to the broker.
+*/
+class ActivityChecker_:
+  connection_ /Connection_
+  keep_alive_ /Duration
+  current_connection_ /Connection_? := null
+
+  constructor .connection_ --keep_alive/Duration:
+    keep_alive_ = keep_alive
+
+  /**
+  Checks for activity.
+
+  Returns a duration for when it wants to be called again.
+  */
+  check -> Duration:
+    // TODO(florian): we should be more clever here:
+    // We should monitor when the transport starts writing, and when it gets a chunk through.
+    // Also, we should monitor that we actually get something from the server.
+    last_write_us := connection_.transport_.last_write_us
+    remaining_keep_alive_us := keep_alive_.in_us - (Time.monotonic_us - last_write_us)
+    if remaining_keep_alive_us > 0:
+      remaining_keep_alive := Duration --us=remaining_keep_alive_us
+      return remaining_keep_alive
+    else if not connection_.is_writing:
+      // TODO(florian): we need to keep track of whether we have sent a ping.
+      connection_.write PingReqPacket
+      return keep_alive_ / 2
+    else:
+      // TODO(florian): we are currently sending.
+      // We should detect timeouts on the sending.
+      return keep_alive_
+
+  run:
+    while not connection_.is_closed:
+      catch:
+        duration := check
+        sleep duration
+
+
+/**
 A connection to the broker.
 
 Primarily ensures that exceptions are handled correctly.
@@ -26,37 +69,98 @@ The first side (reading or writing) that detects an issue with the transport dis
 Also sends ping requests to keep the connection alive (if $keep_alive is called).
 */
 class Connection_:
+  /**
+  The connection is considered alive.
+  This could be because we haven't tried to establish a connection, but it
+    could also be that we are happily running.
+  */
+  static STATE_ALIVE_ ::= 0
+  /**
+  The connection is closed or in the process of closing.
+  Once connected, if there is an error during receiving or sending, the connection will
+    switch to this state and call $Transport.close. This will cause the
+    other side (receive or send) to shut down as well (if there is any).
+  */
+  static STATE_CLOSED_ ::= 1
+
+  state_ / int := STATE_ALIVE_
+
   transport_ / ActivityMonitoringTransport
+  reader_ /reader.BufferedReader
+  writer_ /writer.Writer
+  writing_ /monitor.Mutex ::= monitor.Mutex
+  is_writing_ /bool := false
+
+  closing_reason_ /any := null
+
+  keep_alive_duration_ /Duration?
+  activity_task_ /Task_? := null
 
   /** Constructs a new connection. */
   constructor .transport_ --keep_alive/Duration?:
-    throw "UNIMPLEMENTED"
+    reader_ = reader.BufferedReader transport_
+    writer_ = writer.Writer transport_
+    keep_alive_duration_ = keep_alive
 
-  is_alive -> bool: throw "UNIMPLEMENTED"
-  is_closed -> bool: throw "UNIMPLEMENTED"
+
+  is_alive -> bool: return state_ == STATE_ALIVE_
+  is_closed -> bool: return state_ == STATE_CLOSED_
 
   /**
   Starts a task to keep this connection to the broker alive.
   Sends ping requests when necessary.
   */
   keep_alive --background/bool:
-    throw "UNIMPLEMENTED"
+    assert: background
+    if activity_task_: throw "ALREADY_RUNNING"
+    if keep_alive_duration_ == (Duration --s=0): return
+
+    activity_task_ = task --background::
+      try:
+        checker := ActivityChecker_ this --keep_alive=keep_alive_duration_
+        checker.run
+      finally:
+        activity_task_ = null
 
   /**
   Receives an incoming packet.
   */
   read -> Packet?:
-    throw "UNIMPLEMENTED"
+    if is_closed: throw CLIENT_CLOSED_EXCEPTION
+    try:
+      catch --unwind=(: not is_closed):
+        return Packet.deserialize reader_
+      if closing_reason_: throw closing_reason_
+      return null
+    finally: | is_exception exception |
+      if is_exception:
+        close --reason=exception.value
+        state_ = STATE_CLOSED_
 
   /** Whether the connection is in the process of writing. */
   is_writing -> bool:
-    throw "UNIMPLEMENTED"
+    return is_writing_
 
   /**
   Writes the given $packet, serializing it first.
   */
   write packet/Packet:
-    throw "UNIMPLEMENTED"
+    // The client already serializes most sends. However, some messages are written without
+    // taking the client's lock. For example, 'ack' messages, the 'disconnect' message, or pings
+    // are directly written to the connection (jumping the queue).
+    writing_.do:
+      if is_closed: throw CLIENT_CLOSED_EXCEPTION
+      try:
+        is_writing_ = true
+        exception := catch --unwind=(: not is_closed):
+          writer_.write packet.serialize
+        if exception:
+          assert: is_closed
+          throw CLIENT_CLOSED_EXCEPTION
+      finally: | is_exception exception |
+        is_writing_ = false
+        if is_exception:
+          close --reason=exception.value
 
   /**
   Closes the connection.
@@ -65,8 +169,16 @@ class Connection_:
   Closes the underlying transport.
   */
   close --reason=null:
-    throw "UNIMPLEMENTED"
-
+    if is_closed: return
+    assert: closing_reason_ == null
+    critical_do:
+      closing_reason_ = reason
+      // By setting the state to closed we quell any error messages from disconnecting the transport.
+      state_ = STATE_CLOSED_
+      if activity_task_:
+        activity_task_.cancel
+        activity_task_ = null
+      catch: transport_.close
 
 /**
 A strategy to connect to the broker.
