@@ -109,17 +109,20 @@ test_slow_write create_transport/Lambda logger/log.Logger:
     // When changing things here, update the comment of this function.
     expect_not sent_ping
 
-main:
+main args:
+  test_with_mosquitto := args.contains "--mosquitto"
   log_level := log.ERROR_LEVEL
   logger := log.default.with_level log_level
 
   // Run the three tests in parallel, as they are mostly sleeping.
 
   task:: with_internal_broker --logger=logger: test it logger
-  task:: with_mosquitto --logger=logger: test it logger
+  if test_with_mosquitto:
+    task:: with_mosquitto --logger=logger: test it logger
 
   // We can't test the no-timeout test with mosquitto, as it doesn't support 0 keep-alive.
   task:: with_internal_broker --logger=logger: test_no_timeout it logger
 
   task:: with_internal_broker --logger=logger: test_slow_write it logger
-  task:: with_mosquitto --logger=logger: test_slow_write it logger
+  if test_with_mosquitto:
+    task:: with_mosquitto --logger=logger: test_slow_write it logger
