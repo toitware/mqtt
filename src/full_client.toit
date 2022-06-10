@@ -374,7 +374,7 @@ class FullClient:
 
     try:
       handling_latch_.set true
-      while true:
+      while not task.is_canceled:
         packet /Packet? := null
         catch --unwind=(: not state_ == STATE_DISCONNECTED_ and not state_ == STATE_CLOSING_):
           do_connected_ --allow_disconnected: packet = connection_.read

@@ -7,7 +7,7 @@ import .full_client // For toitdoc.
 /**
 A last will.
 
-When a client disconnects ungracefully from the broker the broker sends this message.
+When a client disconnects ungracefully from the broker, the broker sends this message.
 */
 class LastWill:
   retain/bool

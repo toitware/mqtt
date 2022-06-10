@@ -28,7 +28,6 @@ interface Transport implements reader.Reader:
   Any future $write or $read calls must throw.
 
   The close operation itself must not throw.
-  // TODO(florian): should we deal with disconnections that can throw?
   */
   close -> none
 
