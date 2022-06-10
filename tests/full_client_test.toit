@@ -40,7 +40,7 @@ test_pubsub client/mqtt.FullClient callbacks/Map --logger/log.Logger:
         subscription = sub_topic[0]
         topic = sub_topic[1]
 
-      logger.info "Testing topic: $topic - $subscription"
+      logger.info "testing topic: $topic - $subscription"
 
       wait_for_bar := monitor.Latch
       seen_not_bar := false
