@@ -2,6 +2,7 @@
 // Use of this source code is governed by an MIT-style license that can be
 // found in the LICENSE file.
 
+import net
 import net.tcp
 import writer
 import reader
@@ -24,14 +25,14 @@ class TcpTransport implements Transport BrokerTransport:
   constructor socket/tcp.Socket:
     socket_ = socket
 
-  constructor interface/tcp.Interface --host/string --port/int=1883:
-    return ReconnectingTransport_ interface --host=host --port=port
+  constructor network/net.Interface --host/string --port/int=1883:
+    return ReconnectingTransport_ network --host=host --port=port
 
-  constructor.tls interface/tcp.Interface --host/string --port/int=8883
+  constructor.tls network/net.Interface --host/string --port/int=8883
       --root_certificates/List=[]
       --server_name/string?=null
       --certificate/tls.Certificate?=null:
-    return ReconnectingTlsTransport_ interface --host=host --port=port
+    return ReconnectingTlsTransport_ network --host=host --port=port
       --root_certificates=root_certificates
       --server_name=server_name
       --certificate=certificate
@@ -59,13 +60,13 @@ class TcpTransport implements Transport BrokerTransport:
 
 class ReconnectingTransport_ extends TcpTransport:
   // Reconnection information.
-  interface_ /tcp.Interface
-  host_      /string
-  port_      /int
+  network_ /net.Interface
+  host_    /string
+  port_    /int
 
-  reconnecting_mutex /monitor.Mutex := monitor.Mutex
+  reconnecting_mutex_ /monitor.Mutex := monitor.Mutex
 
-  constructor .interface_ --host/string --port/int=1883:
+  constructor .network_ --host/string --port/int=1883:
     host_ = host
     port_ = port
     super.from_subclass_ null
@@ -79,21 +80,20 @@ class ReconnectingTransport_ extends TcpTransport:
 
   reconnect:
     old_socket := socket_
-    reconnecting_mutex = monitor.Mutex
-    reconnecting_mutex.do:
+    reconnecting_mutex_.do:
       if not identical old_socket socket_: return
       if old_socket: old_socket.close
 
       socket := new_connection_
       // Send messages immediately.
-      socket.set_no_delay true
+      socket.no_delay = true
 
       // Set the new socket_ at the very end. This way we will try to
       // reconnect again if we are interrupted by a timeout.
       socket_ = socket
 
   new_connection_ -> tcp.Socket:
-    return interface_.tcp_connect host_ port_
+    return network_.tcp_connect host_ port_
 
   supports_reconnect -> bool:
     return true
@@ -103,20 +103,19 @@ class ReconnectingTlsTransport_ extends ReconnectingTransport_:
   server_name_ /string?
   root_certificates_ /List
 
-  constructor interface/tcp.Interface --host/string --port/int
+  constructor network/net.Interface --host/string --port/int
       --root_certificates/List=[]
       --server_name/string?=null
       --certificate/tls.Certificate?=null:
     root_certificates_ = root_certificates
     server_name_ = server_name
     certificate_ = certificate
-    super interface --host=host --port=port
+    super network --host=host --port=port
 
   new_connection_ -> tcp.Socket:
-    socket := interface_.tcp_connect host_ port_
+    socket := network_.tcp_connect host_ port_
     socket = tls.Socket.client socket
       --server_name=server_name_ or host_
       --certificate=certificate_
       --root_certificates=root_certificates_
     return socket
-

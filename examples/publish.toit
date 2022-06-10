@@ -29,11 +29,11 @@ main:
   client.start --client_id=CLIENT_ID
       --on_error=:: print "Client error: $it"
 
-  print "connected to broker"
+  print "Connected to broker"
 
   4.repeat:
     client.publish TOPIC "$it".to_byte_array
-    print "published '$it'"
+    print "Published '$it'"
     sleep --ms=1000
 
   client.close

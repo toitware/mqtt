@@ -10,7 +10,7 @@ The backing transport for the MQTT client.
 */
 interface Transport implements reader.Reader:
   /**
-  Write to the transport.
+  Writes to the transport.
 
   Returns the number of bytes written.
   */
@@ -28,7 +28,6 @@ interface Transport implements reader.Reader:
   Any future $write or $read calls must throw.
 
   The close operation itself must not throw.
-  // TODO(florian): should we deal with disconnections that can throw?
   */
   close -> none
 
@@ -54,7 +53,7 @@ interface Transport implements reader.Reader:
 /**
 A transport that monitors activity on a wrapped transport.
 
-The Mqtt library automatically wraps transports in actvity-monitoring
+The MQTT library automatically wraps transports in actvity-monitoring
   transports. Users of the library should never need to instantiate this
   class themselves.
 */
