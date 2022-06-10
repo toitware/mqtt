@@ -292,7 +292,7 @@ monitor PublishChannel_:
   // Messages that haven't been sent yet.
   queued_ /Deque := Deque
 
-  next -> Packet?:
+  next -> Packet:
     await: not queued_.is_empty
     return queued_.remove_first
 
