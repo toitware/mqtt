@@ -45,7 +45,7 @@ test_topic topic/string create_transport/Lambda --mode/string --logger/log.Logge
           publish := packet as mqtt.PublishPacket
           callbacks[publish.topic].call publish
         else:
-          logger.info "Ignored $(mqtt.Packet.debug_string_ packet)"
+          logger.info "ignored $(mqtt.Packet.debug_string_ packet)"
       logger.info "client shut down"
     expect_not_null exception
     done.set true
@@ -58,11 +58,11 @@ test_topic topic/string create_transport/Lambda --mode/string --logger/log.Logge
     else if mode == "publish":
       client.publish topic #[]
   if exception:
-    logger.info "Caught on client side"
+    logger.info "caught on client side"
     client.close
     return
   else:
-    logger.info "Waiting for client to shut down"
+    logger.info "waiting for client to shut down"
     done.get
 
 /**

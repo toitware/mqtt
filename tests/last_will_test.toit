@@ -53,7 +53,7 @@ test create_transport/Lambda --logger/log.Logger:
     task::
       catch:
         client.handle: | packet/mqtt.Packet |
-          logger.info "Received $(mqtt.Packet.debug_string_ packet)"
+          logger.info "received $(mqtt.Packet.debug_string_ packet)"
           client.ack packet
 
         logger.info "client shut down"
@@ -64,7 +64,7 @@ test create_transport/Lambda --logger/log.Logger:
   received_count := 0
   task::
     receiver_client.handle: | packet/mqtt.Packet |
-      logger.info "Received $(mqtt.Packet.debug_string_ packet)"
+      logger.info "received $(mqtt.Packet.debug_string_ packet)"
       receiver_client.ack packet
       if packet is mqtt.PublishPacket:
         received_count++
