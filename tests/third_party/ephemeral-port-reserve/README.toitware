@@ -9,4 +9,4 @@ License: MIT
 
 Description:
 Reserves a port by forcing the port into a TIME_WAIT state which
-  gives subprocesses 60 seconds time to use the port.
+  gives subprocesses 60 seconds to use the port.
