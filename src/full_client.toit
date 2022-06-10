@@ -221,7 +221,93 @@ interface ReconnectionStrategy:
 A base class for reconnection strategies.
 */
 abstract class DefaultReconnectionStrategyBase implements ReconnectionStrategy:
-  UNIMPLEMENTED ::= "UNIMPLEMENTED"
+  static DEFAULT_RECEIVE_CONNECT_TIMEOUT /Duration ::= Duration --s=5
+  static DEFAULT_ATTEMPT_DELAYS /List ::= [
+    Duration --s=1,
+    Duration --s=5,
+    Duration --s=15,
+  ]
+
+  receive_connect_timeout_ /Duration
+  attempt_delays_ /List
+
+  is_closed_ := false
+
+  /**
+  A latch that is set when the client is sleeping before reconnecting.
+  */
+  waiting_for_reconnect_latch_ /monitor.Latch? := null
+
+  constructor
+      --receive_connect_timeout /Duration = DEFAULT_RECEIVE_CONNECT_TIMEOUT
+      --attempt_delays /List /*Duration*/ = DEFAULT_ATTEMPT_DELAYS:
+    receive_connect_timeout_ = receive_connect_timeout
+    attempt_delays_ = attempt_delays
+
+  /**
+  Tries to connect, potentially retrying with delays.
+
+  Returns null if the strategy was closed.
+  Returns whether the broker had a session for this client, otherwise.
+  */
+  do_connect transport/ActivityMonitoringTransport
+      [--reconnect_transport]
+      [--send_connect]
+      [--receive_connect_ack]:
+    for i := -1; i < attempt_delays_.size; i++:
+      if is_closed: return null
+      if i >= 0:
+        // TODO(florian): we want to wait for `close` calls and `sleep` at the same
+        // time. Using a task and latch for this feels very expensive.
+        assert: waiting_for_reconnect_latch_ == null
+        waiting_for_reconnect_latch_ = monitor.Latch
+        sleeping_task := null
+        try:
+          sleeping_task = task::
+            sleep attempt_delays_[i]
+            sleeping_task = null
+            if waiting_for_reconnect_latch_ and not waiting_for_reconnect_latch_.has_value:
+              waiting_for_reconnect_latch_.set true
+
+          // As soon as the sleep is over, or there is a close, we get here.
+          waiting_for_reconnect_latch_.get
+        finally:
+          waiting_for_reconnect_latch_ = null
+          if sleeping_task: sleeping_task.cancel
+
+        if is_closed: return null
+        reconnect_transport.call
+
+      did_connect := false
+
+      is_last_attempt := (i == attempt_delays_.size - 1)
+
+      catch --unwind=(: is_closed or is_last_attempt):
+        send_connect.call
+        return with_timeout receive_connect_timeout_:
+          receive_connect_ack.call
+
+      if is_closed: return null
+
+    unreachable
+
+  abstract connect -> none
+      transport/ActivityMonitoringTransport
+      --is_initial_connection /bool
+      [--reconnect_transport]
+      [--send_connect]
+      [--receive_connect_ack]
+      [--disconnect]
+
+  abstract should_try_reconnect transport/ActivityMonitoringTransport -> bool
+
+  is_closed -> bool:
+    return is_closed_
+
+  close -> none:
+    is_closed_ = true
+    if waiting_for_reconnect_latch_ and not waiting_for_reconnect_latch_.has_value:
+      waiting_for_reconnect_latch_.set null
 
 /**
 The default reconnection strategy for clients that are connected with the
@@ -232,7 +318,31 @@ Since the broker will drop the session information this strategy won't reconnect
   try to connect multiple times for the initial connection.
 */
 class DefaultCleanSessionReconnectionStrategy extends DefaultReconnectionStrategyBase:
-  UNIMPLEMENTED ::= "UNIMPLEMENTED"
+
+  constructor
+      --receive_connect_timeout /Duration = DefaultReconnectionStrategyBase.DEFAULT_RECEIVE_CONNECT_TIMEOUT
+      --attempt_delays /List /*Duration*/ = DefaultReconnectionStrategyBase.DEFAULT_ATTEMPT_DELAYS:
+    super --receive_connect_timeout=receive_connect_timeout --attempt_delays=attempt_delays
+
+  connect -> none
+      transport/ActivityMonitoringTransport
+      --is_initial_connection /bool
+      [--reconnect_transport]
+      [--send_connect]
+      [--receive_connect_ack]
+      [--disconnect]:
+    // The clean session does not reconnect.
+    if not is_initial_connection: throw "INVALID_STATE"
+    session_exists := do_connect transport
+        --reconnect_transport = reconnect_transport
+        --send_connect = send_connect
+        --receive_connect_ack = receive_connect_ack
+    if session_exists:
+      // A clean-session strategy must not find an existing session.
+      throw "INVALID_STATE"
+
+  should_try_reconnect transport/ActivityMonitoringTransport -> bool:
+    return false
 
 /**
 The default reconnection strategy for clients that are connected without the
@@ -241,7 +351,32 @@ The default reconnection strategy for clients that are connected without the
 If the connection drops, the client tries to reconnect potentially multiple times.
 */
 class DefaultSessionReconnectionStrategy extends DefaultReconnectionStrategyBase:
-  UNIMPLEMENTED ::= "UNIMPLEMENTED"
+  constructor
+      --receive_connect_timeout /Duration = DefaultReconnectionStrategyBase.DEFAULT_RECEIVE_CONNECT_TIMEOUT
+      --attempt_delays /List /*Duration*/ = DefaultReconnectionStrategyBase.DEFAULT_ATTEMPT_DELAYS:
+    super --receive_connect_timeout=receive_connect_timeout --attempt_delays=attempt_delays
+
+  connect -> none
+      transport/ActivityMonitoringTransport
+      --is_initial_connection /bool
+      [--reconnect_transport]
+      [--send_connect]
+      [--receive_connect_ack]
+      [--disconnect]:
+    session_exists := do_connect transport
+        --reconnect_transport = reconnect_transport
+        --send_connect = send_connect
+        --receive_connect_ack = receive_connect_ack
+
+    if is_initial_connection or session_exists: return
+
+    // The session was reset.
+    // Disconnect and throw. If the user wants to, they should create a new client.
+    catch: disconnect.call
+    throw "SESSION_EXPIRED"
+
+  should_try_reconnect transport/ActivityMonitoringTransport -> bool:
+    return transport.supports_reconnect
 
 /**
 An MQTT session.
@@ -828,9 +963,33 @@ class FullClient:
   */
   do_connected_ --allow_disconnected/bool=false [block]:
     if is_closed and not (allow_disconnected and state_ == STATE_DISCONNECTED_): throw CLIENT_CLOSED_EXCEPTION
+    while not task.is_canceled:
+      // If the connection is still alive, or if the manager doesn't want us to reconnect, let the
+      // exception go through.
+      should_abandon := :
+        connection_.is_alive or reconnection_strategy_.is_closed or
+          not reconnection_strategy_.should_try_reconnect transport_
 
-    // Reconnection is implemented in follow-up PR.
-    block.call
+      exception := catch --unwind=should_abandon:
+        block.call
+        return
+      assert: exception != null
+      if is_closed: throw CLIENT_CLOSED_EXCEPTION
+      reconnect_ --is_initial_connection=false
+
+  refused_reason_for_return_code_ return_code/int -> string:
+    refused_reason := "CONNECTION_REFUSED"
+    if return_code == ConnAckPacket.UNACCEPTABLE_PROTOCOL_VERSION:
+      refused_reason = "UNACCEPTABLE_PROTOCOL_VERSION"
+    else if return_code == ConnAckPacket.IDENTIFIER_REJECTED:
+      refused_reason = "IDENTIFIER_REJECTED"
+    else if return_code == ConnAckPacket.SERVER_UNAVAILABLE:
+      refused_reason = "SERVER_UNAVAILABLE"
+    else if return_code == ConnAckPacket.BAD_USERNAME_OR_PASSWORD:
+      refused_reason = "BAD_USERNAME_OR_PASSWORD"
+    else if return_code == ConnAckPacket.NOT_AUTHORIZED:
+      refused_reason = "NOT_AUTHORIZED"
+    return refused_reason
 
   /**
   Connects (or reconnects) to the broker.
@@ -838,7 +997,68 @@ class FullClient:
   Uses the reconnection_strategy to do the actual connecting.
   */
   reconnect_ --is_initial_connection/bool -> none:
-    throw "UNIMPLEMENTED"  // follow-up PR.
+    assert: not connection_ or not connection_.is_alive
+    old_connection := connection_
+
+    connecting_.do:
+      // Check that nobody else reconnected while we waited to take the lock.
+      if connection_ != old_connection: return
+
+      if not connection_:
+        assert: is_initial_connection
+        connection_ = Connection_ transport_ --keep_alive=session_.options.keep_alive
+
+      try:
+        reconnection_strategy_.connect transport_
+            --is_initial_connection = is_initial_connection
+            --reconnect_transport = :
+              transport_.reconnect
+              connection_ = Connection_ transport_ --keep_alive=session_.options.keep_alive
+            --send_connect = :
+              packet := ConnectPacket session_.options.client_id
+                  --clean_session=session_.options.clean_session
+                  --username=session_.options.username
+                  --password=session_.options.password
+                  --keep_alive=session_.options.keep_alive
+                  --last_will=session_.options.last_will
+              connection_.write packet
+            --receive_connect_ack = :
+              response := connection_.read
+              if not response: throw "CONNECTION_CLOSED"
+              ack := (response as ConnAckPacket)
+              return_code := ack.return_code
+              if return_code != 0:
+                refused_reason := refused_reason_for_return_code_ return_code
+                connection_.close --reason=refused_reason
+                // The broker refused the connection. This means that the
+                // problem isn't due to a bad connection but almost certainly due to
+                // some bad arguments (like a bad client-id). As such don't try to reconnect
+                // again and just give up.
+                close --force
+                throw refused_reason
+              ack.session_present
+            --disconnect = :
+              connection_.write DisconnectPacket
+      finally: | is_exception exception |
+        if is_exception:
+          close --force
+
+      // If we are here, then the reconnection succeeded.
+
+      // Make sure the connection sends pings so the broker doesn't drop us.
+      connection_.keep_alive --background
+
+      // Resend the pending messages.
+      session_.do --pending: | packet_id/int persistent_id/int |
+        persisted := persistence_store.get persistent_id
+        // The persistence store might decide not to resend some packets.
+        if not persisted: session_.remove_pending packet_id
+        else:
+          topic := persisted.topic
+          payload := persisted.payload
+          retain := persisted.retain
+          packet := PublishPacket topic payload --packet_id=packet_id --qos=1 --retain=retain --duplicate
+          connection_.write packet
 
   /** Tears down the client. */
   tear_down_:
