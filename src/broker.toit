@@ -329,7 +329,7 @@ class Broker:
         exception := catch --trace:
           packet := connection.read
           if not packet:
-            logger_.info "Connection was closed"
+            logger_.info "connection was closed"
             connection.close
             continue.listen
 
