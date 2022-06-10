@@ -41,4 +41,3 @@ class SessionOptions:
       --.password = null
       --.keep_alive = DEFAULT_KEEP_ALIVE
       --.last_will = null:
-
