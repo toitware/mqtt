@@ -101,7 +101,6 @@ abstract class Packet:
   static debug_string_ packet/Packet -> string:
     if packet is ConnectPacket:
       connect := packet as ConnectPacket
-      "foo" + "bar"
       return ("Connect: $connect.client_id"
               + " $(connect.clean_session ? "clean": "reuse")"
               + " $(connect.last_will ? "last-will-for-$connect.last_will.topic": "no-last-will")"
@@ -123,7 +122,7 @@ abstract class Packet:
           + " $(publish.duplicate ? "dup": "no-dup")"
           + " $(publish.retain ? "retain": "no-retain")"
           + " $(publish.payload.size) bytes"
-      if publish.payload.size < 15:
+      if publish.payload.size < 15 and (publish.payload.every: it < 128):
         result += " \"$(publish.payload.to_string_non_throwing)\""
       return result
     else if packet is PubAckPacket:
@@ -152,8 +151,6 @@ abstract class Packet:
       return "Disconnect"
     else:
       return "Packet of type $packet.type"
-
-  stringify -> string: return debug_string_ this
 
 class ConnectPacket extends Packet:
   static TYPE ::= 1
@@ -259,8 +256,8 @@ class PublishPacket extends Packet:
   packet_id /int?
 
   constructor.deserialize_ reader/reader.BufferedReader size/int flags/int:
-    retain := flags & 0b1 != 0
-    qos := (flags >> 1) & 0b11
+    retain := flags & 0b0001 != 0
+    qos := (flags & 0b0110) >> 1
     duplicate := flags & 0b1000 != 0
     topic = Packet.decode_string reader
     size -= 2 + topic.size
@@ -270,11 +267,11 @@ class PublishPacket extends Packet:
     else:
       packet_id = null
     payload = reader.read_bytes size
-    super TYPE --flags=(qos << 1) | (retain ? 1 : 0) | (duplicate ? 0b1000 : 0)
+    super TYPE --flags=(duplicate ? 0b1000 : 0) | (qos << 1) | (retain ? 1 : 0)
 
   constructor .topic .payload --qos/int --retain/bool --.packet_id --duplicate=false:
     super TYPE
-        --flags=(qos << 1) | (retain ? 1 : 0) | (duplicate ? 0b1000 : 0)
+        --flags=(duplicate ? 0b1000 : 0) | (qos << 1) | (retain ? 1 : 0)
 
   variable_header -> ByteArray:
     buffer := bytes.Buffer
@@ -339,14 +336,15 @@ class SubscribePacket extends Packet:
     super TYPE --flags=0b0010
 
   constructor.deserialize_ reader/reader.BufferedReader size/int:
+    consumed := 0
     packet_id = Packet.decode_uint16 reader
-    size -= 2
+    consumed += 2
     topics = []
-    while size > 0:
+    while consumed < size:
       topic := Packet.decode_string reader
-      size -= 2 + topic.size
+      consumed += 2 + topic.size
       max_qos := reader.read_byte
-      size--
+      consumed++
       topic_qos := TopicQos topic --max_qos=max_qos
       topics.add topic_qos
     super TYPE --flags=0b0010
@@ -391,12 +389,13 @@ class UnsubscribePacket extends Packet:
   packet_id/int
 
   constructor.deserialize_ reader/reader.BufferedReader size/int:
+    consumed := 0
     packet_id = Packet.decode_uint16 reader
-    size -= 2
+    consumed += 2
     topics = []
-    while size > 0:
+    while consumed < size:
       topic := Packet.decode_string reader
-      size -= 2 + topic.size
+      consumed += 2 + topic.size
       topics.add topic
     super TYPE --flags=0b0010
 

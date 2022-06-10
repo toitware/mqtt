@@ -8,13 +8,14 @@ A simple MQTT broker library.
 This implementation was created for testing, but is fully functional.
 */
 
+import monitor
 import reader
 import writer
 import log
 import .packets
 import .last_will
 import .topic_qos
-import .topic_tree_
+import .topic_tree
 
 /**
 The transport interface used by the broker.
@@ -285,19 +286,19 @@ class Session_:
       NO_PACKET_ID ::= -1  // See $PublishPacket.with.
       packet_id := qos > 0 ? next_packet_id_++ : NO_PACKET_ID
       send_ (packet.with --packet_id=packet_id --qos=qos)
-
-
 /** An unbounded channel for publish messages. */
-monitor PublishChannel_:
+class PublishChannel_:
   // Messages that haven't been sent yet.
   queued_ /Deque := Deque
+  semaphore_ /monitor.Semaphore := monitor.Semaphore
 
-  next -> Packet?:
-    await: not queued_.is_empty
+  next -> Packet:
+    semaphore_.down
     return queued_.remove_first
 
   add packet/Packet:
     queued_.add packet
+    semaphore_.up
 
 /**
 An MQTT broker.
@@ -329,7 +330,7 @@ class Broker:
         exception := catch --trace:
           packet := connection.read
           if not packet:
-            logger_.info "Connection was closed"
+            logger_.info "connection was closed"
             connection.close
             continue.listen
 

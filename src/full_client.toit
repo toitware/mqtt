@@ -53,7 +53,7 @@ class ActivityChecker_:
       return keep_alive_
 
   run:
-    while not connection_.is_closed:
+    while not task.is_canceled and not connection_.is_closed:
       catch:
         duration := check
         sleep duration
@@ -113,7 +113,7 @@ class Connection_:
   keep_alive --background/bool:
     assert: background
     if activity_task_: throw "ALREADY_RUNNING"
-    if keep_alive_duration_ == (Duration --s=0): return
+    if keep_alive_duration_ == Duration.ZERO: return
 
     activity_task_ = task --background::
       try:
@@ -244,7 +244,6 @@ abstract class DefaultReconnectionStrategyBase implements ReconnectionStrategy:
     receive_connect_timeout_ = receive_connect_timeout
     attempt_delays_ = attempt_delays
 
-
   /**
   Tries to connect, potentially retrying with delays.
 
@@ -309,7 +308,6 @@ abstract class DefaultReconnectionStrategyBase implements ReconnectionStrategy:
     is_closed_ = true
     if waiting_for_reconnect_latch_ and not waiting_for_reconnect_latch_.has_value:
       waiting_for_reconnect_latch_.set null
-
 
 /**
 The default reconnection strategy for clients that are connected with the
@@ -434,16 +432,23 @@ interface PersistenceStore:
   Returns a persistent-store id which can be used to $get or $remove the data
     from the store.
   */
-  store topic/string payload/ByteArray --retain/bool -> int
+  add topic/string payload/ByteArray --retain/bool -> int
 
   /**
-  Finds the persistent packet with $persistent_id and calls the given $block
-    with arguments topic, payload and retain (in that order).
-
-  The store may decide not to resend a packet, in which case it calls
-    $if_absent with the $persistent_id.
+  Variant of $(add topic payload --retain) that takes a PersistedPacket.
   */
-  get persistent_id/int [block] [--if_absent] -> none
+  add packet/PersistedPacket -> int
+
+  /**
+  Finds the persistent packet with $persistent_id and returns it.
+
+  If no such packet exists, returns null.
+
+  # Advanced
+  The MQTT protocol does not explicitly allow to drop packets. However,
+    most brokers should do fine with it.
+  */
+  get persistent_id/int -> PersistedPacket?
 
   /**
   Removes the data for the packet with $persistent_id.
@@ -454,15 +459,18 @@ interface PersistenceStore:
   /**
   Calls the given block for each stored packet.
 
-  The arguments to the block are:
-  - the persistent id
-  - the topic
-  - the payload
-  - the retain flag
+  The order of the packets is in insertion order.
+
+  The arguments to the block are the persistent id, and the
+    corresponding $PersistedPacket.
+
+  # Inheritance
+  The MQTT protocol does not allow to drop messages that are not acknowledged.
+    However, most brokers can probably deal with it.
   */
   do [block] -> none
 
-class PersistentPacket_:
+class PersistedPacket:
   topic /string
   payload /ByteArray
   retain /bool
@@ -473,36 +481,36 @@ class PersistentPacket_:
 A persistence store that stores the packets in memory.
 */
 class MemoryPersistenceStore implements PersistenceStore:
-  storage_ /Map := {:}
-  id_ /int := 0
+  /**
+  A map from persistent id to $PersistedPacket.
 
-  store topic/string payload/ByteArray --retain/bool -> int:
-    id := id_++
-    storage_[id] = PersistentPacket_ topic payload --retain=retain
+  It is crucial that the map is in insertion order.
+  The last entry of the map must have the highest persistent-id.
+  */
+  storage_ /Map := {:}
+
+  add topic/string payload/ByteArray --retain/bool -> int:
+    return add (PersistedPacket topic payload --retain=retain)
+
+  add packet/PersistedPacket -> int:
+    id := ?
+    if storage_.is_empty: id = 0
+    else: id = storage_.last + 1
+    storage_[id] = packet
     return id
 
-  get persistent_id/int [block] [--if_absent] -> none:
-    stored := storage_.get persistent_id
-    if stored:
-      block.call stored.topic stored.payload stored.retain
-    else:
-      if_absent.call persistent_id
+  get persistent_id/int -> PersistedPacket?:
+    return storage_.get persistent_id
 
   remove persistent_id/int -> none:
     storage_.remove persistent_id
 
   /**
-  Calls the given block for each stored packet.
-
-  The arguments to the block are:
-  - the persistent id
-  - the topic
-  - the payload
-  - the retain flag
+  Calls the given block for each stored packet in insertion order.
+  See $PersistenceStore.do.
   */
   do [block] -> none:
-    storage_.do: | id/int packet/PersistentPacket_ |
-      block.call id packet.topic packet.payload packet.retain
+    storage_.do block
 
 
 /**
@@ -660,7 +668,7 @@ class FullClient:
 
     try:
       handling_latch_.set true
-      while true:
+      while not task.is_canceled:
         packet /Packet? := null
         catch --unwind=(: not state_ == STATE_DISCONNECTED_ and not state_ == STATE_CLOSING_):
           do_connected_ --allow_disconnected: packet = connection_.read
@@ -825,19 +833,21 @@ class FullClient:
     if topic == "" or topic.contains "+" or topic.contains "#": throw "INVALID_ARGUMENT"
     packet_id := send_publish_ topic payload --qos=qos --retain=retain
     if qos == 1:
-      persistent_id := persistence_store.store topic payload --retain=retain
+      persistent_id := persistence_store.add topic payload --retain=retain
       session_.set_pending_ack --packet_id=packet_id --persistent_id=persistent_id
 
   /**
   Publishes the MQTT message stored in the persistence store identified by $persistent_id.
   */
-  publish_persisted persistent_id/int --qos=1 -> none:
-    persistence_store.get persistent_id
-        --if_absent=: throw "PERSISTED_MESSAGE_NOT_FOUND"
-        : | topic payload retain |
-          packet_id := send_publish_ topic payload --qos=qos --retain=retain
-          if qos == 1:
-            session_.set_pending_ack --packet_id=packet_id --persistent_id=persistent_id
+  publish_persisted persistent_id/int --qos/int -> none:
+    persisted := persistence_store.get persistent_id
+    if not persisted: throw "PERSISTED_NOT_FOUND"
+    topic := persisted.topic
+    payload := persisted.payload
+    retain := persisted.retain
+    packet_id := send_publish_ topic payload --qos=qos --retain=retain
+    if qos == 1:
+      session_.set_pending_ack --packet_id=packet_id --persistent_id=persistent_id
 
   /**
   Sends a $PublishPacket with the given $topic, $payload, $qos and $retain.
@@ -953,7 +963,7 @@ class FullClient:
   */
   do_connected_ --allow_disconnected/bool=false [block]:
     if is_closed and not (allow_disconnected and state_ == STATE_DISCONNECTED_): throw CLIENT_CLOSED_EXCEPTION
-    while true:
+    while not task.is_canceled:
       // If the connection is still alive, or if the manager doesn't want us to reconnect, let the
       // exception go through.
       should_abandon := :
@@ -991,7 +1001,7 @@ class FullClient:
     old_connection := connection_
 
     connecting_.do:
-      // Check that nobody else reconnected while we took the lock.
+      // Check that nobody else reconnected while we waited to take the lock.
       if connection_ != old_connection: return
 
       if not connection_:
@@ -1020,7 +1030,10 @@ class FullClient:
               if return_code != 0:
                 refused_reason := refused_reason_for_return_code_ return_code
                 connection_.close --reason=refused_reason
-                // No need to retry.
+                // The broker refused the connection. This means that the
+                // problem isn't due to a bad connection but almost certainly due to
+                // some bad arguments (like a bad client-id). As such don't try to reconnect
+                // again and just give up.
                 close --force
                 throw refused_reason
               ack.session_present
@@ -1037,12 +1050,15 @@ class FullClient:
 
       // Resend the pending messages.
       session_.do --pending: | packet_id/int persistent_id/int |
-        // The persistence store is allowed to decide not to resend packets.
-        persistence_store.get persistent_id
-          --if_absent=: session_.remove_pending packet_id
-          : | topic/string payload/ByteArray retain/bool |
-            packet := PublishPacket topic payload --packet_id=packet_id --qos=1 --retain=retain --duplicate
-            connection_.write packet
+        persisted := persistence_store.get persistent_id
+        // The persistence store might decide not to resend some packets.
+        if not persisted: session_.remove_pending packet_id
+        else:
+          topic := persisted.topic
+          payload := persisted.payload
+          retain := persisted.retain
+          packet := PublishPacket topic payload --packet_id=packet_id --qos=1 --retain=retain --duplicate
+          connection_.write packet
 
   /** Tears down the client. */
   tear_down_:
