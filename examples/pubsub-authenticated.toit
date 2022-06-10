@@ -47,7 +47,7 @@ main:
   client.start --options=options
       --on_error=:: print "Client error: $it"
 
-  print "connected to broker"
+  print "Connected to broker"
 
   client.subscribe "$TOPIC_PREFIX/+":: | topic payload |
     if payload == #[0]:

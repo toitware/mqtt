@@ -37,6 +37,6 @@ main:
 
   client.start --options=options
 
-  print "connected to broker"
+  print "Connected to broker"
   // Close without sending a disconnect packet.
   client.close --force

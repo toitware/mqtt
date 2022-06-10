@@ -45,7 +45,7 @@ main:
         unsubscribed_latch.set true
         print "Unsubscribed"
       else:
-        print "unknown packet of type $packet.type"
+        print "Unknown packet of type $packet.type"
 
   // Wait for the client to be ready.
   client.when_running: null

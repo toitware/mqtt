@@ -19,7 +19,7 @@ main:
   client := mqtt.Client --transport=transport
 
   client.start --client_id=CLIENT_ID
-  print "connected to broker"
+  print "Connected to broker"
 
 
 SERVER_CERTIFICATE := x509.Certificate.parse """\
