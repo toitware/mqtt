@@ -244,7 +244,6 @@ abstract class DefaultReconnectionStrategyBase implements ReconnectionStrategy:
     receive_connect_timeout_ = receive_connect_timeout
     attempt_delays_ = attempt_delays
 
-
   /**
   Tries to connect, potentially retrying with delays.
 
@@ -309,7 +308,6 @@ abstract class DefaultReconnectionStrategyBase implements ReconnectionStrategy:
     is_closed_ = true
     if waiting_for_reconnect_latch_ and not waiting_for_reconnect_latch_.has_value:
       waiting_for_reconnect_latch_.set null
-
 
 /**
 The default reconnection strategy for clients that are connected with the
@@ -965,7 +963,7 @@ class FullClient:
   */
   do_connected_ --allow_disconnected/bool=false [block]:
     if is_closed and not (allow_disconnected and state_ == STATE_DISCONNECTED_): throw CLIENT_CLOSED_EXCEPTION
-    while true:
+    while not task.is_canceled:
       // If the connection is still alive, or if the manager doesn't want us to reconnect, let the
       // exception go through.
       should_abandon := :
@@ -1032,7 +1030,10 @@ class FullClient:
               if return_code != 0:
                 refused_reason := refused_reason_for_return_code_ return_code
                 connection_.close --reason=refused_reason
-                // No need to retry.
+                // The broker refused the connection. This means that the
+                // problem isn't due to a bad connection but almost certainly due to
+                // some bad arguments (like a bad client-id). As such don't try to reconnect
+                // again and just give up.
                 close --force
                 throw refused_reason
               ack.session_present
@@ -1049,12 +1050,15 @@ class FullClient:
 
       // Resend the pending messages.
       session_.do --pending: | packet_id/int persistent_id/int |
-        // The persistence store is allowed to decide not to resend packets.
-        persistence_store.get persistent_id
-          --if_absent=: session_.remove_pending packet_id
-          : | topic/string payload/ByteArray retain/bool |
-            packet := PublishPacket topic payload --packet_id=packet_id --qos=1 --retain=retain --duplicate
-            connection_.write packet
+        persisted := persistence_store.get persistent_id
+        // The persistence store might decide not to resend some packets.
+        if not persisted: session_.remove_pending packet_id
+        else:
+          topic := persisted.topic
+          payload := persisted.payload
+          retain := persisted.retain
+          packet := PublishPacket topic payload --packet_id=packet_id --qos=1 --retain=retain --duplicate
+          connection_.write packet
 
   /** Tears down the client. */
   tear_down_:
