@@ -8,7 +8,10 @@ all: test
 build/CMakeCache.txt:
 	$(MAKE) rebuild-cmake
 
-test: rebuild-cmake
+install-pkgs: rebuild-cmake
+	(cd build && ninja install-pkgs)
+
+test: install-pkgs rebuild-cmake
 	(cd build && ninja check)
 
 # We rebuild the cmake file all the time.
@@ -19,4 +22,4 @@ rebuild-cmake:
 	mkdir -p build
 	(cd build && cmake .. -G Ninja)
 
-.PHONY: all test rebuild-cmake
+.PHONY: all test rebuild-cmake install-pkgs
