@@ -1003,7 +1003,7 @@ class FullClient:
     old_connection := connection_
 
     connecting_.do:
-      // Check that nobody else reconnected while we took the lock.
+      // Check that nobody else reconnected while we waited to take the lock.
       if connection_ != old_connection: return
 
       if not connection_:
