@@ -28,7 +28,7 @@ start_mosquitto:
 with_mosquitto --logger/log.Logger [block]:
   mosquitto_data := start_mosquitto
   port := mosquitto_data[0]
-  logger.info "Started Mosquitto on port $port"
+  logger.info "started mosquitto on port $port"
 
   mosquitto_fork_data := mosquitto_data[1]
 
