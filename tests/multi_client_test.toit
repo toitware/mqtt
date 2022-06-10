@@ -41,7 +41,7 @@ test create_transport/Lambda --logger/log.Logger:
     client := client_index == 0 ? client1 : client2
     task::
       client.handle: | packet/mqtt.Packet |
-        logger.info "Received $(mqtt.Packet.debug_string_ packet)"
+        logger.info "received $(mqtt.Packet.debug_string_ packet)"
         if client_index == 0: client1_callback.call packet
         else: client2_callback.call packet
 

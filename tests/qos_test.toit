@@ -127,7 +127,7 @@ test create_transport/Lambda --logger/log.Logger:
 
   task::
     client.handle: | packet/mqtt.Packet |
-      logger.info "Received $(mqtt.Packet.debug_string_ packet)"
+      logger.info "received $(mqtt.Packet.debug_string_ packet)"
       if packet is mqtt.PublishPacket:
         if not auto_ack: client.ack packet
         if (packet as mqtt.PublishPacket).topic == "idle": idle.up
