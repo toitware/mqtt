@@ -41,9 +41,9 @@ main:
 
   options := mqtt.SessionOptions
       --clean_session
-      --client_id = CLIENT_ID
-      --username = USERNAME
-      --password = PASSWORD
+      --client_id=CLIENT_ID
+      --username=USERNAME
+      --password=PASSWORD
   client.start --options=options
       --on_error=:: print "Client error: $it"
 

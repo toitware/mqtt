@@ -1,4 +1,4 @@
-// Copyright (C) 2021 Toitware ApS.
+// Copyright (C) 2022 Toitware ApS.
 // Use of this source code is governed by a Zero-Clause BSD license that can
 // be found in the EXAMPLES_LICENSE file.
 
@@ -48,13 +48,19 @@ main:
         print "Unknown packet of type $packet.type"
 
   // Wait for the client to be ready.
-  client.when_running: null
+  // Note that the client can be used outside the `when_running` block, but
+  // users should wait for the client to be ready before using it.
+  // For example:
+  // ```
+  // client.when_running: null
+  // client.subscribe ...
+  // ```
+  client.when_running:
+    client.subscribe "$TOPIC_PREFIX/#"
+    client.publish "$TOPIC_PREFIX/foo" "hello_world".to_byte_array
+    client.publish "$TOPIC_PREFIX/bar" "hello_world".to_byte_array --qos=1
+    client.unsubscribe "$TOPIC_PREFIX/#"
 
-  client.subscribe "$TOPIC_PREFIX/#"
-  client.publish "$TOPIC_PREFIX/foo" "hello_world".to_byte_array
-  client.publish "$TOPIC_PREFIX/bar" "hello_world".to_byte_array --qos=1
-  client.unsubscribe "$TOPIC_PREFIX/#"
-
-  // Wait for the confirmation that we have unsubscribed.
-  unsubscribed_latch.get
-  client.close
+    // Wait for the confirmation that we have unsubscribed.
+    unsubscribed_latch.get
+    client.close

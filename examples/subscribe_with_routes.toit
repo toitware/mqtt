@@ -1,4 +1,4 @@
-// Copyright (C) 2021 Toitware ApS.
+// Copyright (C) 2022 Toitware ApS.
 // Use of this source code is governed by a Zero-Clause BSD license that can
 // be found in the EXAMPLES_LICENSE file.
 
@@ -20,7 +20,7 @@ Be default uses an MQTT broker on localhost.
 // change the client id, as well as the topic.
 HOST ::= "127.0.0.1"
 
-CLIENT_ID ::= "toit-subscribe"
+CLIENT_ID ::= "toit-subscribe-$(random)"
 TOPIC ::= "toit/example/#"
 
 main:
@@ -28,8 +28,8 @@ main:
 
   client := mqtt.Client --transport=transport --routes={
     TOPIC: :: | topic payload |
-      print "with-routes - $topic: $payload.to_string_non_throwing"
+      print "Received: $topic: $payload.to_string_non_throwing"
   }
 
-  client.start --client_id="$CLIENT_ID-with-routes"
+  client.start --client_id=CLIENT_ID
       --on_error=:: print "Client error: $it"

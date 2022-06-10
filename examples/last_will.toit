@@ -7,7 +7,7 @@ import mqtt.transport
 import mqtt.packets
 import net
 
-LAST_WILL_TOPIC ::= "/toit-last-will"
+LAST_WILL_TOPIC ::= "toit/last-will-$(random)"
 HOST ::= "test.mosquitto.org"
 PORT ::= 1883
 
@@ -32,7 +32,7 @@ main:
   client := mqtt.Client --transport=transport
 
   options := mqtt.SessionOptions
-      --client_id="toit-client-id"
+      --client_id=""  // A fresh ID chosen by the broker.
       --last_will=last_will
 
   client.start --options=options
