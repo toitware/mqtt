@@ -57,7 +57,7 @@ with_mosquitto --logger/log.Logger [block]:
     block.call:: mqtt.TcpTransport network --host="localhost" --port=port
   finally: | is_exception _ |
     pid := mosquitto_fork_data[3]
-    logger.info "Killing mosquitto server"
+    logger.info "killing mosquitto server"
     pipe.kill_ pid 15
     pipe.wait_for pid
     if is_exception:
