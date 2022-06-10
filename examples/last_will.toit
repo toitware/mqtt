@@ -7,35 +7,19 @@ import mqtt.transport
 import mqtt.packets
 import net
 
-LAST_WILL_TOPIC ::= "/toit-last-will"
+LAST_WILL_TOPIC ::= "toit/last-will-$(random)"
 HOST ::= "test.mosquitto.org"
 PORT ::= 1883
 
 start_will_listener:
-  socket := net.open.tcp_connect HOST PORT
-  client := mqtt.Client "toit-client-id2"
-      mqtt.TcpTransport socket
-  client.subscribe LAST_WILL_TOPIC --qos=1
-  client.handle: | topic msg |
-    print "Received $topic $msg.to_string"
+  transport := mqtt.TcpTransport net.open --host=HOST --port=PORT
+  client := mqtt.Client --transport=transport
+  client.start
+  client.subscribe LAST_WILL_TOPIC:: | topic msg |
+    print "Received $msg.to_string"
     client.close
-    return
-
-class HoleTcpTransport implements transport.Transport:
-  transport_ / transport.Transport
-  forward_messages := true
-
-  constructor .transport_:
-
-  send packet/packets.Packet:
-    if forward_messages: transport_.send packet
-
-  receive --timeout/Duration?=null -> packets.Packet?:
-    return transport_.receive --timeout=timeout
 
 main:
-  socket := net.open.tcp_connect HOST PORT
-
   task:: start_will_listener
 
   last_will := mqtt.LastWill
@@ -43,17 +27,16 @@ main:
     "Bye!".to_byte_array
     --qos=1
 
-  tcp_transport := mqtt.TcpTransport socket
-  hole_transport := HoleTcpTransport tcp_transport
+  transport := mqtt.TcpTransport net.open --host=HOST --port=PORT
 
-  client := mqtt.Client
-    "toit-client-id"
-    hole_transport
-    --last_will=last_will
-    --keep_alive=Duration --s=10
+  client := mqtt.Client --transport=transport
 
-  print "connected to broker"
+  options := mqtt.SessionOptions
+      --client_id=""  // A fresh ID chosen by the broker.
+      --last_will=last_will
 
-  // Disconnect the sending part of the client, so that the broker
-  // thinks that the device dropped off.
-  hole_transport.forward_messages = false
+  client.start --options=options
+
+  print "Connected to broker"
+  // Close without sending a disconnect packet.
+  client.close --force
