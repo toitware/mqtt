@@ -54,7 +54,6 @@ class TestBrokerTransport implements broker.BrokerTransport:
   close -> none:
     pipe_.broker_close
 
-
 class TestServerTransport implements broker.ServerTransport:
   channel_ /monitor.Channel := monitor.Channel 5
 
@@ -75,7 +74,6 @@ class TestServerTransport implements broker.ServerTransport:
   close -> none:
     is_closed = true
     channel_.send null
-
 
 monitor TestTransportPipe:
   client_to_broker_data_ /Deque := Deque
@@ -139,7 +137,6 @@ monitor Pipe_ implements reader.Reader:
     await: not data_
     data_ = bytes
 
-
 class InterceptingReader_ implements reader.Reader:
   wrapped_ /reader.Reader
   intercepted /Deque := Deque
@@ -150,7 +147,6 @@ class InterceptingReader_ implements reader.Reader:
     bytes := wrapped_.read
     intercepted.add bytes
     return bytes
-
 
 class TestTransport implements mqtt.Transport:
   activity_ := []

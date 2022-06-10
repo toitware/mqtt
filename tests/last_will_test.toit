@@ -60,14 +60,14 @@ test create_transport/Lambda --logger/log.Logger:
 
   subscription_ack_semaphore := monitor.Semaphore
 
+  received := monitor.Semaphore
   received_packets := {:}
-  received_count := 0
   task::
     receiver_client.handle: | packet/mqtt.Packet |
       logger.info "received $(mqtt.Packet.debug_string_ packet)"
       receiver_client.ack packet
       if packet is mqtt.PublishPacket:
-        received_count++
+        received.up
         publish := packet as mqtt.PublishPacket
         received_packets[publish.topic] = publish
       else if packet is mqtt.SubAckPacket:
@@ -92,7 +92,7 @@ test create_transport/Lambda --logger/log.Logger:
   // Cut the connections of the clients, triggering a last will.
   transports.do: it.close
 
-  while received_count != 4: sleep --ms=10
+  4.repeat: received.down
 
   4.repeat:
     packet /mqtt.PublishPacket := received_packets["test/last_will$it"]
@@ -105,7 +105,6 @@ test create_transport/Lambda --logger/log.Logger:
     expect_not packet.retain
 
   // Reset.
-  received_count = 0
   received_packets.clear
 
   // Subscribe again to get the retained messages.
@@ -114,8 +113,7 @@ test create_transport/Lambda --logger/log.Logger:
   receiver_client.subscribe "test/last_will2"
   receiver_client.subscribe "test/last_will3"
 
-  while received_count != 2: sleep --ms=10
-
+  2.repeat: received.down
   received_packets.do: | topic packet/mqtt.PublishPacket |
     payload := packet.payload.to_string
     parts := payload.split " "
