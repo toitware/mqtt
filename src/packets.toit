@@ -256,8 +256,8 @@ class PublishPacket extends Packet:
   packet_id /int?
 
   constructor.deserialize_ reader/reader.BufferedReader size/int flags/int:
-    retain := flags & 0b1 != 0
-    qos := (flags >> 1) & 0b11
+    retain := flags & 0b0001 != 0
+    qos := (flags & 0b0110) >> 1
     duplicate := flags & 0b1000 != 0
     topic = Packet.decode_string reader
     size -= 2 + topic.size
@@ -267,11 +267,11 @@ class PublishPacket extends Packet:
     else:
       packet_id = null
     payload = reader.read_bytes size
-    super TYPE --flags=(qos << 1) | (retain ? 1 : 0) | (duplicate ? 0b1000 : 0)
+    super TYPE --flags=(duplicate ? 0b1000 : 0) | (qos << 1) | (retain ? 1 : 0)
 
   constructor .topic .payload --qos/int --retain/bool --.packet_id --duplicate=false:
     super TYPE
-        --flags=(qos << 1) | (retain ? 1 : 0) | (duplicate ? 0b1000 : 0)
+        --flags=(duplicate ? 0b1000 : 0) | (qos << 1) | (retain ? 1 : 0)
 
   variable_header -> ByteArray:
     buffer := bytes.Buffer
