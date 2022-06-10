@@ -10,13 +10,7 @@ import .packets
 import .tcp // For toitdoc.
 import .transport
 import .topic_qos
-import .topic_tree_
-
-class CallbackEntry_:
-  callback /Lambda
-  max_qos /int
-
-  constructor .callback .max_qos:
+import .topic_tree
 
 class Client:
   client_ /FullClient
@@ -31,8 +25,8 @@ class Client:
     See $TcpTransport.
 
   The $routes must be a map from topic (of type $string) to callback. After the client started, it
-    will automatically subscribe to all topics in the map (with a max-qos of 1). If the broker has
-    already a session for this client (which can only happen if the $SessionOptions.clean_session flag
+    will automatically subscribe to all topics in the map (with a max-qos of 1). If the broker already
+    has a session for this client (which can only happen if the $SessionOptions.clean_session flag
     is not set), then the client might receive messages for these topics before there was any time to
     call $subscribe, which is why it's a good idea to set the routes in the constructor.
   */
@@ -51,7 +45,7 @@ class Client:
 
   Starts the client with default session options.
   If $client_id is given, uses it as the client ID. Otherwise, changes the
-    'clean_session' flag of the options to true, and lets the broker chose a
+    'clean_session' flag of the options to true, and lets the broker choose a
     fresh client ID.
   */
   start -> none
@@ -209,3 +203,9 @@ class Client:
   */
   close --force/bool=false -> none:
     client_.close --force=force
+
+class CallbackEntry_:
+  callback /Lambda
+  max_qos /int
+
+  constructor .callback .max_qos:
