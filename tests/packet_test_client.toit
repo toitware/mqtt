@@ -12,6 +12,11 @@ import .transport
 
 /**
 Tests that the client and broker correctly ack packets.
+
+Calls the block with a client, and three lambdas:
+- wait_for_idle: sends a packet to the broker and waits for it to come back.
+- clear: clears the activity that is logged.
+- get_activity: returns the packets that were captured (see $TestTransport).
 */
 with_packet_client create_transport/Lambda [block]
     --logger /log.Logger
@@ -19,6 +24,7 @@ with_packet_client create_transport/Lambda [block]
     --clean_session /bool = true
     --keep_alive /Duration = (Duration --s=10_000) // Mosquitto doesn't support 0-duration keep-alives.
     --reconnection_strategy /mqtt.ReconnectionStrategy? = null
+    --persistence_store /mqtt.PersistenceStore? = null
     --on_handle_error /Lambda? = null
     --read_filter /Lambda? = null
     --write_filter /Lambda? = null:
@@ -32,7 +38,9 @@ with_packet_client create_transport/Lambda [block]
       --client_id = client_id
       --keep_alive = keep_alive
       --clean_session = clean_session
-  client.connect --options=options --reconnection_strategy=reconnection_strategy
+  client.connect --options=options
+      --persistence_store = persistence_store
+      --reconnection_strategy = reconnection_strategy
 
   // We are going to use a "idle" ping packet to know when the broker is idle.
   // It's not a guarantee as the broker is allowed to send acks whenever it wants, but
@@ -45,7 +53,7 @@ with_packet_client create_transport/Lambda [block]
     idle.down
 
   task::
-    exception := catch --unwind=(on_handle_error == null):
+    exception := catch --unwind=(on_handle_error == null) --trace:
       client.handle: | packet/mqtt.Packet |
         logger.info "received $(mqtt.Packet.debug_string_ packet)"
         if packet is mqtt.PublishPacket:
