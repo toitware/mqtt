@@ -292,7 +292,7 @@ class PublishChannel_:
   queued_ /Deque := Deque
   semaphore_ /monitor.Semaphore := monitor.Semaphore
 
-  next -> Packet?:
+  next -> Packet:
     semaphore_.down
     return queued_.remove_first
 
@@ -330,7 +330,7 @@ class Broker:
         exception := catch --trace:
           packet := connection.read
           if not packet:
-            logger_.info "Connection was closed"
+            logger_.info "connection was closed"
             connection.close
             continue.listen
 
