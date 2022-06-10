@@ -53,7 +53,7 @@ class ActivityChecker_:
       return keep_alive_
 
   run:
-    while not connection_.is_closed:
+    while not task.is_canceled and not connection_.is_closed:
       catch:
         duration := check
         sleep duration
@@ -113,7 +113,7 @@ class Connection_:
   keep_alive --background/bool:
     assert: background
     if activity_task_: throw "ALREADY_RUNNING"
-    if keep_alive_duration_ == (Duration --s=0): return
+    if keep_alive_duration_ == Duration.ZERO: return
 
     activity_task_ = task --background::
       try:
