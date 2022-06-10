@@ -51,7 +51,7 @@ class Client:
 
   Starts the client with default session options.
   If $client_id is given, uses it as the client ID. Otherwise, changes the
-    'clean_session' flag of the options to true, and lets the broker chose a
+    'clean_session' flag of the options to true, and lets the broker choose a
     fresh client ID.
   */
   start -> none
