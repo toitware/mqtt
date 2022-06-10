@@ -16,7 +16,8 @@ import .transport
 import .packet_test_client
 
 /**
-Tests that the client and broker correctly ack packets.
+Tests that the persistence store stores unsent packets, and that a new
+  client can reuse that persistence store.
 */
 test create_transport/Lambda --logger/log.Logger:
   persistence_store := mqtt.MemoryPersistenceStore
@@ -37,6 +38,7 @@ test create_transport/Lambda --logger/log.Logger:
       --persistence_store = persistence_store
       --logger=logger: | client/mqtt.FullClient _ _ _ |
 
+    // The write-filter will not let this packet through and stop every future write.
     client.publish "to_be_intercepted" "payload".to_byte_array --qos=1
 
     intercepting_writing.get
@@ -45,6 +47,7 @@ test create_transport/Lambda --logger/log.Logger:
 
     expect_equals 1 persistence_store.size
 
+  // We reconnect with a new client reusing the same persistence store.
   with_packet_client create_transport
       --client_id = id
       --persistence_store = persistence_store
@@ -56,6 +59,7 @@ test create_transport/Lambda --logger/log.Logger:
 
     expect persistence_store.is_empty
 
+    // We check that the persisted packet is now sent and removed from the store.
     publish_packets := (activity.filter: it[0] == "write" and it[1] is mqtt.PublishPacket).map: it[1]
     publish_packets.filter --in_place: it.topic == "to_be_intercepted"
     expect_equals 1 publish_packets.size
