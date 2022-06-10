@@ -79,7 +79,7 @@ test_pubsub client/mqtt.FullClient callbacks/Map --logger/log.Logger:
 test_multisub client/mqtt.FullClient callbacks/Map --logger/log.Logger:
   client.subscribe "idle"
   2.repeat: | max_qos |
-    logger.info "Testing multi-subscription with max-qos=$max_qos"
+    logger.info "testing multi-subscription with max-qos=$max_qos"
 
     TOPICS ::= [
       "foo/+/gee",
@@ -125,7 +125,7 @@ test create_transport/Lambda --logger/log.Logger:
         publish := packet as mqtt.PublishPacket
         callbacks[publish.topic].call publish
       else:
-        logger.info "Ignored $(mqtt.Packet.debug_string_ packet)"
+        logger.info "ignored $(mqtt.Packet.debug_string_ packet)"
     logger.info "client shut down"
 
   client.when_running:
