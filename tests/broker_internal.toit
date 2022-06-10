@@ -7,7 +7,6 @@ import mqtt.broker
 import .transport
 
 with_internal_broker --logger/log.Logger [block]:
-
   server_transport := TestServerTransport
   broker := broker.Broker server_transport --logger=logger
   broker_task := task:: broker.start

@@ -9,7 +9,6 @@ import mqtt
 import mqtt.transport as mqtt
 import net
 
-
 start_mosquitto:
   port /string := pipe.backticks "python" "third_party/ephemeral-port-reserve/ephemeral_port_reserve.py"
   port = port.trim
