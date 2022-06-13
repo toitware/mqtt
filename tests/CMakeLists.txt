@@ -24,9 +24,9 @@ add_custom_target(
   USES_TERMINAL
 )
 
-if (${WITH_MOSQUITTO})
-  set(MOSQUITTO_FLAG "--mosquitto")
-endif()
+# if (${WITH_MOSQUITTO})
+#   set(MOSQUITTO_FLAG "--mosquitto")
+# endif()
 
 foreach(file ${TESTS})
   add_test(
