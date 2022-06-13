@@ -44,7 +44,6 @@ start_mosquitto:
   ]
 
 with_mosquitto --logger/log.Logger [block]:
-  version := get_mosquitto_version
   mosquitto_data := start_mosquitto
   port := mosquitto_data[0]
   logger.info "started mosquitto on port $port"
@@ -66,12 +65,8 @@ with_mosquitto --logger/log.Logger [block]:
       logger.debug str
       stderr_bytes += chunk
       full_str := stderr_bytes.to_string
-      if version.starts_with "1.":
-        if full_str.contains "Opening ipv6 listen socket on port":
-          mosquitto_is_running.set true
-      else:
-        if full_str.contains "mosquitto version" and full_str.contains "running":
-          mosquitto_is_running.set true
+      if full_str.contains "Opening ipv6 listen socket on port":
+        mosquitto_is_running.set true
 
   // Give mosquitto a second to start.
   // If it didn't start we might be looking for the wrong line in its output.
@@ -80,11 +75,19 @@ with_mosquitto --logger/log.Logger [block]:
   with_timeout --ms=1_000:
     mosquitto_is_running.get
 
-  if version.starts_with "1.":
-    // Just give it a tiny bit more time to really start up.
-    sleep --ms=50
-
   network := net.open
+
+  // Even though Mosquitto claims that it is listening (and in v2 it even claims
+  // that it is "running"), that doesn't mean that it is ready for connections
+  // yet.
+  for i := 0; i < 10; i++:
+    socket := null
+    exception := catch:
+      socket = network.tcp_connect "localhost" port
+    if socket:
+      socket.close
+      break
+    sleep --ms=(50*i)
 
   try:
     block.call:: mqtt.TcpTransport network --host="localhost" --port=port
