@@ -504,9 +504,8 @@ class MemoryPersistenceStore implements PersistenceStore:
     return storage_.get persisted_id
 
   remove_persisted_with_id persisted_id/int -> bool:
-    result := storage_.contains persisted_id
-    storage_.remove persisted_id
-    return result
+    storage_.remove persisted_id --if_absent=: return false
+    return true
 
   /**
   Calls the given block for each stored packet in insertion order.
