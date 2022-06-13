@@ -84,9 +84,16 @@ class ReconnectingTransport_ extends TcpTransport:
       if not identical old_socket socket_: return
       if old_socket: old_socket.close
 
-      socket := new_connection_
+      // TODO(florian): we dynamically try to call `no_delay = true` or
+      // `set_no_delay true`. The first is for newer Toit versions, the latter
+      // for older versions.
+      // Eventually we should stop supporting old versions.
+      socket /any := new_connection_
       // Send messages immediately.
-      socket.no_delay = true
+      exception := catch:
+        socket.no_delay = true
+      if exception:
+        socket.set_no_delay true
 
       // Set the new socket_ at the very end. This way we will try to
       // reconnect again if we are interrupted by a timeout.
