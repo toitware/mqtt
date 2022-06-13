@@ -520,7 +520,7 @@ class MemoryPersistenceStore implements PersistenceStore:
     return storage_.is_empty
 
   /**
-  The count of persisted packets
+  The count of persisted packets.
   */
   size -> int:
     return storage_.size
