@@ -45,8 +45,7 @@ with_mosquitto --logger/log.Logger [block]:
       str := chunk.to_string.trim
       logger.debug str
       stderr_bytes += chunk
-      if (stderr_bytes.to_string.contains "Opening ipv4 listen socket on poxrt"):
-        print "mosquitto is running"
+      if (stderr_bytes.to_string.contains "Opening ipv4 listen socket on port"):
         mosquitto_is_running.set true
 
   // Give mosquitto a second to start.
