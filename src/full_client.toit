@@ -220,28 +220,19 @@ interface ReconnectionStrategy:
 /**
 A latch that has a timeout when getting its value.
 */
-monitor WaitLatch_:
-  has_value_ /bool := false
-  value_ /any := null
+monitor WaitSignal_:
+  has_triggered_ /bool := false
 
   /**
-  Either returns the latch's value or returns null if the timeout is reached.
-
-  If the value can be null, use $has_value to check whether the returned value
-    is the actual value or not.
+  Either returns true if the signal is triggered or null if the timeout is reached.
   */
-  get --timeout/Duration:
-    try_await --deadline=(Time.monotonic_us + timeout.in_us): has_value_
-    // If there is a value, return it. Otherwise return `null` (which is the
-    // initial value)
-    return value_
+  wait --timeout/Duration -> bool?:
+    try_await --deadline=(Time.monotonic_us + timeout.in_us): has_triggered_
+    if has_triggered_: return true
+    return null
 
-  set value:
-    value_ = value
-    has_value_ = true
-
-  has_value -> bool:
-    return has_value_
+  trigger -> none:
+    has_triggered_ = true
 
 /**
 A base class for reconnection strategies.
@@ -262,7 +253,7 @@ abstract class DefaultReconnectionStrategyBase implements ReconnectionStrategy:
   /**
   A latch that is set when the client is closed.
   */
-  closed_latch_ /WaitLatch_ := WaitLatch_
+  closed_signal_ /WaitSignal_ := WaitSignal_
 
   constructor
       --receive_connect_timeout /Duration = DEFAULT_RECEIVE_CONNECT_TIMEOUT
@@ -284,7 +275,7 @@ abstract class DefaultReconnectionStrategyBase implements ReconnectionStrategy:
       if is_closed: return null
       if i >= 0:
         sleep_duration := attempt_delays_[i]
-        closed_latch_.get --timeout=sleep_duration
+        closed_signal_.wait --timeout=sleep_duration
         if is_closed: return null
         reconnect_transport.call
 
@@ -316,7 +307,7 @@ abstract class DefaultReconnectionStrategyBase implements ReconnectionStrategy:
 
   close -> none:
     is_closed_ = true
-    if not closed_latch_.has_value: closed_latch_.set true
+    closed_signal_.trigger
 
 /**
 The default reconnection strategy for clients that are connected with the
