@@ -18,9 +18,13 @@ add_custom_target(
 include(ProcessorCount)
 ProcessorCount(NUM_CPU)
 
+# The tests are doing a lot of waiting.
+# Increase parallelism.
+math(EXPR PARALLEL_COUNT "2 * ${NUM_CPU}")
+
 add_custom_target(
   check
-  COMMAND ${CMAKE_CTEST_COMMAND} -j${NUM_CPU} -T test --output-on-failure
+  COMMAND ${CMAKE_CTEST_COMMAND} -j${PARALLEL_COUNT} -T test --output-on-failure
   USES_TERMINAL
 )
 
