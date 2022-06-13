@@ -387,23 +387,33 @@ Keeps track of data that must survive disconnects (assuming the user didn't use
 class Session_:
   next_packet_id_ /int? := 1
 
-  /** Packets that are still missing an ack. */
-  pending_ /Map ::= {:}  // From packet_id to persistent_id.
+  /**
+  The persistence store used by this session.
+
+  All messages with qos=1 are stored in this store immediately after they have
+    been sent. Once the client receives an 'ack' they are removed from it.
+
+  If the client closes, but the store isn't empty, then some messages might not
+    have reached the broker.
+
+  Use $PersistenceStore.do to iterate over the stored messages.
+  */
+  persistence_store_ /PersistenceStore
 
   options /SessionOptions
 
-  constructor .options:
+  constructor .options .persistence_store_:
 
-  set_pending_ack --packet_id/int --persistent_id/int:
-    pending_[packet_id] = persistent_id
+  set_pending_ack topic/string payload/ByteArray --packet_id/int --retain/bool:
+    persistent := PersistedPacket topic payload --retain=retain --packet_id=packet_id
+    persistence_store_.add persistent
 
-  handle_ack id/int [--if_absent] -> int?:
-    result := pending_.get id
-    pending_.remove id --if_absent=if_absent
-    return result
+  handle_ack id/int [--if_absent] -> none:
+    if not persistence_store_.remove_persisted_with_id id:
+      if_absent.call id
 
   remove_pending id/int -> none:
-    pending_.remove id
+    persistence_store_.remove_persisted_with_id id
 
   next_packet_id -> int:
     return next_packet_id_++
@@ -413,10 +423,10 @@ class Session_:
 
   It is not allowed to change the pending map while calling this method.
 
-  Calls the $block with the packet_id and persistent_id of each pending packet.
+  Calls the $block with the packet_id and persisted_id of each pending packet.
   */
   do --pending/bool [block] -> none:
-    pending_.do block
+    persistence_store_.do block
 
 /**
 A persistence strategy for the MQTT client.
@@ -429,18 +439,13 @@ This is also true if the client tries to connect reusing an existing session, bu
 interface PersistenceStore:
   /**
   Stores the publish-packet information in the persistent store.
-  Returns a persistent-store id which can be used to $get or $remove the data
-    from the store.
+  Returns a persistent-store id which can be used to $get or
+    $remove_persisted_with_id the data from the store.
   */
-  add topic/string payload/ByteArray --retain/bool -> int
+  add packet/PersistedPacket -> none
 
   /**
-  Variant of $(add topic payload --retain) that takes a PersistedPacket.
-  */
-  add packet/PersistedPacket -> int
-
-  /**
-  Finds the persistent packet with $persistent_id and returns it.
+  Finds the persistent packet with $persisted_id and returns it.
 
   If no such packet exists, returns null.
 
@@ -448,21 +453,22 @@ interface PersistenceStore:
   The MQTT protocol does not explicitly allow to drop packets. However,
     most brokers should do fine with it.
   */
-  get persistent_id/int -> PersistedPacket?
+  get persisted_id/int -> PersistedPacket?
 
   /**
-  Removes the data for the packet with $persistent_id.
-  Does nothing if there is no data associated to $persistent_id.
+  Removes the data for the packet with $persisted_id.
+  Does nothing if there is no data associated to $persisted_id.
+
+  Returns whether the store contained the id.
   */
-  remove persistent_id/int -> none
+  remove_persisted_with_id persisted_id/int -> bool
 
   /**
   Calls the given block for each stored packet.
 
   The order of the packets is in insertion order.
 
-  The arguments to the block are the persistent id, and the
-    corresponding $PersistedPacket.
+  The block is called with a $PersistedPacket.
 
   # Inheritance
   The MQTT protocol does not allow to drop messages that are not acknowledged.
@@ -471,11 +477,12 @@ interface PersistenceStore:
   do [block] -> none
 
 class PersistedPacket:
+  packet_id /int
   topic /string
   payload /ByteArray
   retain /bool
 
-  constructor .topic .payload --.retain:
+  constructor .topic .payload --.packet_id --.retain:
 
 /**
 A persistence store that stores the packets in memory.
@@ -489,29 +496,33 @@ class MemoryPersistenceStore implements PersistenceStore:
   */
   storage_ /Map := {:}
 
-  add topic/string payload/ByteArray --retain/bool -> int:
-    return add (PersistedPacket topic payload --retain=retain)
-
-  add packet/PersistedPacket -> int:
-    id := ?
-    if storage_.is_empty: id = 0
-    else: id = storage_.last + 1
+  add packet/PersistedPacket -> none:
+    id := packet.packet_id
     storage_[id] = packet
-    return id
 
-  get persistent_id/int -> PersistedPacket?:
-    return storage_.get persistent_id
+  get persisted_id/int -> PersistedPacket?:
+    return storage_.get persisted_id
 
-  remove persistent_id/int -> none:
-    storage_.remove persistent_id
+  remove_persisted_with_id persisted_id/int -> bool:
+    storage_.remove persisted_id --if_absent=: return false
+    return true
 
   /**
   Calls the given block for each stored packet in insertion order.
   See $PersistenceStore.do.
   */
   do [block] -> none:
-    storage_.do block
+    storage_.do --values block
 
+  /** Whether no packet is persisted. */
+  is_empty -> bool:
+    return storage_.is_empty
+
+  /**
+  The count of persisted packets.
+  */
+  size -> int:
+    return storage_.size
 
 /**
 An MQTT client.
@@ -582,19 +593,6 @@ class FullClient:
   sending_ /monitor.Mutex := monitor.Mutex
 
   /**
-  The persistence store used by this client.
-
-  All messages with qos=1 are stored in this store immediately after they have
-    been sent. Once the client receives an 'ack' they are removed from it.
-
-  If the client closes, but the store isn't empty, then some messages might not
-    have reached the broker.
-
-  Use $PersistenceStore.do to iterate over the stored messages.
-  */
-  persistence_store /PersistenceStore
-
-  /**
   Keeps track of the last acked packet.
 
   If the packet was not acked during the callback of $handle we will do so automatically
@@ -610,11 +608,9 @@ class FullClient:
   */
   constructor
       --transport /Transport
-      --logger /log.Logger = log.default
-      --persistence_store /PersistenceStore? = null:
+      --logger /log.Logger = log.default:
     transport_ = ActivityMonitoringTransport.private_(transport)
     logger_ = logger
-    this.persistence_store = persistence_store or MemoryPersistenceStore
 
   /**
   Checks whether a user is allowed to send a message.
@@ -634,6 +630,7 @@ class FullClient:
   */
   connect -> none
       --options /SessionOptions
+      --persistence_store /PersistenceStore = MemoryPersistenceStore
       --reconnection_strategy /ReconnectionStrategy? = null:
     if state_ != STATE_CREATED_: throw "INVALID_STATE"
     assert: not connection_
@@ -645,7 +642,7 @@ class FullClient:
     else:
       reconnection_strategy_ = DefaultSessionReconnectionStrategy
 
-    session_ = Session_ options
+    session_ = Session_ options persistence_store
 
     state_ = STATE_CONNECTING_
     reconnect_ --is_initial_connection
@@ -702,9 +699,8 @@ class FullClient:
           // The persistence store is allowed to toss out packets it doesn't want to
           // send again. If we receive an unmatched packet id, it might be from an
           // earlier attempt to send it.
-          persistence_id := session_.handle_ack id
+          session_.handle_ack id
               --if_absent=: logger_.info "unmatched packet id: $id"
-          if persistence_id: persistence_store.remove persistence_id
         else:
           logger_.info "unexpected packet of type $packet.type"
     finally:
@@ -833,21 +829,7 @@ class FullClient:
     if topic == "" or topic.contains "+" or topic.contains "#": throw "INVALID_ARGUMENT"
     packet_id := send_publish_ topic payload --qos=qos --retain=retain
     if qos == 1:
-      persistent_id := persistence_store.add topic payload --retain=retain
-      session_.set_pending_ack --packet_id=packet_id --persistent_id=persistent_id
-
-  /**
-  Publishes the MQTT message stored in the persistence store identified by $persistent_id.
-  */
-  publish_persisted persistent_id/int --qos/int -> none:
-    persisted := persistence_store.get persistent_id
-    if not persisted: throw "PERSISTED_NOT_FOUND"
-    topic := persisted.topic
-    payload := persisted.payload
-    retain := persisted.retain
-    packet_id := send_publish_ topic payload --qos=qos --retain=retain
-    if qos == 1:
-      session_.set_pending_ack --packet_id=packet_id --persistent_id=persistent_id
+      session_.set_pending_ack topic payload --packet_id=packet_id --retain=retain
 
   /**
   Sends a $PublishPacket with the given $topic, $payload, $qos and $retain.
@@ -1049,16 +1031,13 @@ class FullClient:
       connection_.keep_alive --background
 
       // Resend the pending messages.
-      session_.do --pending: | packet_id/int persistent_id/int |
-        persisted := persistence_store.get persistent_id
-        // The persistence store might decide not to resend some packets.
-        if not persisted: session_.remove_pending packet_id
-        else:
-          topic := persisted.topic
-          payload := persisted.payload
-          retain := persisted.retain
-          packet := PublishPacket topic payload --packet_id=packet_id --qos=1 --retain=retain --duplicate
-          connection_.write packet
+      session_.do --pending: | persisted/PersistedPacket |
+        packet_id := persisted.packet_id
+        topic := persisted.topic
+        payload := persisted.payload
+        retain := persisted.retain
+        packet := PublishPacket topic payload --packet_id=packet_id --qos=1 --retain=retain --duplicate
+        connection_.write packet
 
   /** Tears down the client. */
   tear_down_:
