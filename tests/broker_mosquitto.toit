@@ -45,10 +45,16 @@ with_mosquitto --logger/log.Logger [block]:
       str := chunk.to_string.trim
       logger.debug str
       stderr_bytes += chunk
-      if str.contains "mosquitto version" and str.contains "running":
+      if (stderr_bytes.to_string.contains "Opening ipv4 listen socket on poxrt"):
+        print "mosquitto is running"
         mosquitto_is_running.set true
 
-  mosquitto_is_running.get
+  // Give mosquitto a second to start.
+  // If it didn't start we might be looking for the wrong line in its output.
+  // There was a change between 1.6.9 and 2.0.14. Could be that there is
+  // going to be another one.
+  with_timeout --ms=1_000:
+    mosquitto_is_running.get
 
   network := net.open
 
