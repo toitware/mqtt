@@ -25,7 +25,6 @@ get_mosquitto_version:
 
   pipe.wait_for fork_data[3]
   out_str := out_data.to_string
-  print "mosquitto out: $out_str"
   first_line /string := (out_str.split "\n").first
   return first_line.trim --left "mosquitto version "
 
