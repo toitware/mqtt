@@ -4,7 +4,6 @@
 
 import expect show *
 import log
-import monitor
 import mqtt
 import mqtt.transport as mqtt
 import mqtt.packets as mqtt
@@ -14,6 +13,7 @@ import .broker_internal
 import .broker_mosquitto
 import .packet_test_client
 import .transport
+import .util
 
 /**
 Tests that the clean session flag is correctly handled.
@@ -149,7 +149,7 @@ test_client_qos create_transport/Lambda --logger/log.Logger:
     created_transport
 
   // The read filter intercepts the first puback and sets the latch.
-  intercepted_latch := monitor.Latch
+  intercepted_latch := Latch
   read_filter := :: | packet/mqtt.Packet |
     if not intercepted_latch.has_value and packet is mqtt.PubAckPacket:
       intercepted_latch.set (packet as mqtt.PubAckPacket).packet_id

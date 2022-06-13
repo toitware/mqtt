@@ -525,6 +525,29 @@ class MemoryPersistenceStore implements PersistenceStore:
     return storage_.size
 
 /**
+A copy of $monitor.Latch.
+
+Older version of the SDK don't have the $has_value function, so
+  we use a copy here.
+*/
+// TODO(florian): remove copy of the Latch and use the original one
+// from the monitor library.
+monitor Latch:
+  has_value_ := false
+  value_ := null
+
+  get:
+    await: has_value_
+    return value_
+
+  set value:
+    value_ = value
+    has_value_ = true
+
+  has_value -> bool:
+    return has_value_
+
+/**
 An MQTT client.
 
 The client is responsible for maintaining the connection to the server.
@@ -582,7 +605,7 @@ class FullClient:
 
   Note that we allow to read the latch multiple times.
   */
-  handling_latch_ /monitor.Latch := monitor.Latch
+  handling_latch_ /Latch := Latch
 
   /**
   A mutex to queue the senders.
