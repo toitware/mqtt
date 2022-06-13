@@ -218,6 +218,23 @@ interface ReconnectionStrategy:
   close -> none
 
 /**
+A latch that has a timeout when getting its value.
+*/
+monitor WaitSignal_:
+  has_triggered_ /bool := false
+
+  /**
+  Either returns true if the signal is triggered or null if the timeout is reached.
+  */
+  wait --timeout/Duration -> bool?:
+    try_await --deadline=(Time.monotonic_us + timeout.in_us): has_triggered_
+    if has_triggered_: return true
+    return null
+
+  trigger -> none:
+    has_triggered_ = true
+
+/**
 A base class for reconnection strategies.
 */
 abstract class DefaultReconnectionStrategyBase implements ReconnectionStrategy:
@@ -234,9 +251,9 @@ abstract class DefaultReconnectionStrategyBase implements ReconnectionStrategy:
   is_closed_ := false
 
   /**
-  A latch that is set when the client is sleeping before reconnecting.
+  A latch that is set when the client is closed.
   */
-  waiting_for_reconnect_latch_ /monitor.Latch? := null
+  closed_signal_ /WaitSignal_ := WaitSignal_
 
   constructor
       --receive_connect_timeout /Duration = DEFAULT_RECEIVE_CONNECT_TIMEOUT
@@ -257,24 +274,8 @@ abstract class DefaultReconnectionStrategyBase implements ReconnectionStrategy:
     for i := -1; i < attempt_delays_.size; i++:
       if is_closed: return null
       if i >= 0:
-        // TODO(florian): we want to wait for `close` calls and `sleep` at the same
-        // time. Using a task and latch for this feels very expensive.
-        assert: waiting_for_reconnect_latch_ == null
-        waiting_for_reconnect_latch_ = monitor.Latch
-        sleeping_task := null
-        try:
-          sleeping_task = task::
-            sleep attempt_delays_[i]
-            sleeping_task = null
-            if waiting_for_reconnect_latch_ and not waiting_for_reconnect_latch_.has_value:
-              waiting_for_reconnect_latch_.set true
-
-          // As soon as the sleep is over, or there is a close, we get here.
-          waiting_for_reconnect_latch_.get
-        finally:
-          waiting_for_reconnect_latch_ = null
-          if sleeping_task: sleeping_task.cancel
-
+        sleep_duration := attempt_delays_[i]
+        closed_signal_.wait --timeout=sleep_duration
         if is_closed: return null
         reconnect_transport.call
 
@@ -306,8 +307,7 @@ abstract class DefaultReconnectionStrategyBase implements ReconnectionStrategy:
 
   close -> none:
     is_closed_ = true
-    if waiting_for_reconnect_latch_ and not waiting_for_reconnect_latch_.has_value:
-      waiting_for_reconnect_latch_.set null
+    closed_signal_.trigger
 
 /**
 The default reconnection strategy for clients that are connected with the
