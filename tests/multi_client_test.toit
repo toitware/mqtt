@@ -86,10 +86,11 @@ test create_transport/Lambda --logger/log.Logger:
   client1.close
   client2.close
 
-main:
+main args:
+  test_with_mosquitto := args.contains "--mosquitto"
   log_level := log.ERROR_LEVEL
   logger := log.default.with_level log_level
 
   run_test := : | create_transport/Lambda | test create_transport --logger=logger
   with_internal_broker --logger=logger run_test
-  with_mosquitto --logger=logger run_test
+  if test_with_mosquitto: with_mosquitto --logger=logger run_test
