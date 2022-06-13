@@ -7,6 +7,10 @@ on:
 
 jobs:
   build:
+    strategy:
+      matrix:
+        toit_version: [ "v1", "v2" ]
+
     runs-on: ubuntu-latest
 
     steps:
@@ -14,7 +18,15 @@ jobs:
 
       - name: Setup constants
         run: |
-          echo "TOIT_URL=https://github.com/toitlang/toit/releases/download/v2.0.0-alpha.3/toit-linux.tar.gz" >> $GITHUB_ENV
+          TOIT_V1="https://github.com/toitlang/toit/releases/download/v1.6.15/toit-linux.tar.gz"
+          TOIT_V2="https://github.com/toitlang/toit/releases/download/v2.0.0-alpha.3/toit-linux.tar.gz"
+
+          if [[ "${{ matrix.toit_version }}" = "v1" ]]; then
+            echo "TOIT_URL=$TOIT_V1" >> $GITHUB_ENV;
+          else
+            echo "TOIT_URL=$TOIT_V2" >> $GITHUB_ENV;
+          fi
+
           export DOWNLOAD_DIR="${{ github.workspace }}/downloads"
           echo "DOWNLOAD_DIR=$DOWNLOAD_DIR" >> $GITHUB_ENV
           echo "TOIT_EXEC=$DOWNLOAD_DIR/toit/bin/toit.run" >> $GITHUB_ENV
