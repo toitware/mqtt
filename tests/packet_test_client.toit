@@ -53,7 +53,7 @@ with_packet_client create_transport/Lambda [block]
     idle.down
 
   task::
-    exception := catch --unwind=(on_handle_error == null) --trace:
+    exception := catch --unwind=(on_handle_error == null):
       client.handle: | packet/mqtt.Packet |
         logger.info "received $(mqtt.Packet.debug_string_ packet)"
         if packet is mqtt.PublishPacket:
