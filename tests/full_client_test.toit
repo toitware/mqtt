@@ -136,7 +136,7 @@ test create_transport/Lambda --logger/log.Logger:
 
 main args:
   test_with_mosquitto := args.contains "--mosquitto"
-  log_level := log.DEBUG_LEVEL
+  log_level := log.ERROR_LEVEL
   logger := log.default.with_level log_level
 
   run_test := : | create_transport/Lambda | test create_transport --logger=logger

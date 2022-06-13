@@ -45,7 +45,8 @@ with_mosquitto --logger/log.Logger [block]:
       str := chunk.to_string.trim
       logger.debug str
       stderr_bytes += chunk
-      if (stderr_bytes.to_string.contains "Opening ipv4 listen socket on port"):
+      full_str := stderr_bytes.to_string
+      if (stderr_bytes.to_string.contains "Opening ipv6 listen socket on port"):
         mosquitto_is_running.set true
 
   // Give mosquitto a second to start.
@@ -54,6 +55,10 @@ with_mosquitto --logger/log.Logger [block]:
   // going to be another one.
   with_timeout --ms=1_000:
     mosquitto_is_running.get
+
+  // Just give it a tiny bit more time to really start up.
+  // On newer mosquitto versions we could wait for the "mosquitto version xyz running" message.
+  sleep --ms=50
 
   network := net.open
 
