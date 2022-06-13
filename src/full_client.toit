@@ -5,7 +5,6 @@
 import monitor
 import log
 import reader
-import writer
 
 import .session_options
 import .last_will
@@ -13,6 +12,7 @@ import .packets
 import .tcp  // For toitdoc.
 import .topic_qos
 import .transport
+import .util
 
 CLIENT_CLOSED_EXCEPTION ::= "CLIENT_CLOSED"
 
@@ -87,7 +87,7 @@ class Connection_:
 
   transport_ / ActivityMonitoringTransport
   reader_ /reader.BufferedReader
-  writer_ /writer.Writer
+  writer_ /Writer
   writing_ /monitor.Mutex ::= monitor.Mutex
   is_writing_ /bool := false
 
@@ -99,7 +99,7 @@ class Connection_:
   /** Constructs a new connection. */
   constructor .transport_ --keep_alive/Duration?:
     reader_ = reader.BufferedReader transport_
-    writer_ = writer.Writer transport_
+    writer_ = Writer transport_
     keep_alive_duration_ = keep_alive
 
 
@@ -523,29 +523,6 @@ class MemoryPersistenceStore implements PersistenceStore:
   */
   size -> int:
     return storage_.size
-
-/**
-A copy of $monitor.Latch.
-
-Older version of the SDK don't have the $has_value function, so
-  we use a copy here.
-*/
-// TODO(florian): remove copy of the Latch and use the original one
-// from the monitor library.
-monitor Latch:
-  has_value_ := false
-  value_ := null
-
-  get:
-    await: has_value_
-    return value_
-
-  set value:
-    value_ = value
-    has_value_ = true
-
-  has_value -> bool:
-    return has_value_
 
 /**
 An MQTT client.
