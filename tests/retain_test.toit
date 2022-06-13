@@ -31,8 +31,7 @@ test create_transport/Lambda --logger/log.Logger:
     wait_for_idle.call
 
     // 2 messages for the subscription.
-    // 2 for the idle.
-    expect_equals 4 get_activity.call.size
+    expect_equals 2 get_activity.call.size
 
     2.repeat: | qos |
       // Now send a packet with retain.
@@ -48,8 +47,7 @@ test create_transport/Lambda --logger/log.Logger:
       activity := get_activity.call
       // 2 messages for the subscription.
       // 1 or 2 for the retained packet. (depending on qos)
-      // 2 for the idle.
-      expected_count := qos == 0 ? 5 : 6
+      expected_count := qos == 0 ? 3 : 4
       expect_equals expected_count activity.size
       reads := activity.filter: it[0] == "read"
       writes := activity.filter: it[0] == "write"
@@ -68,9 +66,8 @@ test create_transport/Lambda --logger/log.Logger:
     wait_for_idle.call
 
     // 2 messages for the subscription.
-    // 2 for the idle.
     // No retained packet.
-    expect_equals 4 get_activity.call.size
+    expect_equals 2 get_activity.call.size
 
     // Check that other clients also get the retained message.
 

@@ -51,6 +51,8 @@ with_packet_client create_transport/Lambda [block]
   wait_for_idle := ::
     client.publish idle_topic #[] --qos=0
     idle.down
+    client.publish idle_topic #[] --qos=0
+    idle.down
 
   task::
     exception := catch --unwind=(on_handle_error == null):
@@ -71,6 +73,13 @@ with_packet_client create_transport/Lambda [block]
   block.call client
       wait_for_idle
       :: logging_transport.clear
-      :: logging_transport.activity
+      ::
+        activity := logging_transport.activity
+        activity.filter:
+          is_idle_packet :=
+            (it[0] == "read" or it[0] == "write") and
+              it[1] is mqtt.PublishPacket and
+                (it[1] as mqtt.PublishPacket).topic == idle_topic
+          not is_idle_packet
 
   client.close
