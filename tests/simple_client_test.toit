@@ -103,17 +103,21 @@ test_unclean_session create_transport/Lambda --logger/log.Logger:
       routed_messages_counter++
       expect_equals "msg" payload.to_string
   }
-  catch_all_counter = 0
+  // Don't use the same counter as before, as the client might not have
+  // shut down. Since we are reuising the same client id, the broker
+  // is supposed to kick the old client, but mosquitto seems to sometimes
+  // still send a message to the old client.
+  catch_all_counter2 := 0
   unclean_client.start --client_id="unclean"
       --catch_all_callback=:: | topic/string payload/ByteArray |
-        catch_all_counter++
+        catch_all_counter2++
 
   done = monitor.Latch
   unclean_client.subscribe "done":: done.set true
   unclean_client.publish "done" "done".to_byte_array --qos=0
   done.get
 
-  expect_equals 0 catch_all_counter
+  expect_equals 0 catch_all_counter2
   expect_equals 2 routed_messages_counter
 
   unclean_client.close
