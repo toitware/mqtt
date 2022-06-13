@@ -9,6 +9,26 @@ import mqtt
 import mqtt.transport as mqtt
 import net
 
+get_mosquitto_version:
+  fork_data := pipe.fork
+      true  // use_path.
+      pipe.PIPE_INHERITED  // stdin.
+      pipe.PIPE_CREATED    // stdout.
+      pipe.PIPE_INHERITED  // stderr.
+      "mosquitto"  // Program.
+      ["mosquitto", "-h"]  // Args.
+  stdout /pipe.OpenPipe := fork_data[1]
+  out_data := #[]
+  task::
+    while chunk := stdout.read:
+      out_data += chunk
+
+  pipe.wait_for fork_data[3]
+  out_str := out_data.to_string
+  print "mosquitto out: $out_str"
+  first_line /string := (out_str.split "\n").first
+  return first_line.trim --left "mosquitto version "
+
 start_mosquitto:
   port /string := pipe.backticks "python" "third_party/ephemeral-port-reserve/ephemeral_port_reserve.py"
   port = port.trim
@@ -25,6 +45,7 @@ start_mosquitto:
   ]
 
 with_mosquitto --logger/log.Logger [block]:
+  version := get_mosquitto_version
   mosquitto_data := start_mosquitto
   port := mosquitto_data[0]
   logger.info "started mosquitto on port $port"
@@ -46,8 +67,12 @@ with_mosquitto --logger/log.Logger [block]:
       logger.debug str
       stderr_bytes += chunk
       full_str := stderr_bytes.to_string
-      if (stderr_bytes.to_string.contains "Opening ipv6 listen socket on port"):
-        mosquitto_is_running.set true
+      if version.starts_with "1.":
+        if full_str.contains "Opening ipv6 listen socket on port":
+          mosquitto_is_running.set true
+      else:
+        if full_str.contains "mosquitto version" and full_str.contains "running":
+          mosquitto_is_running.set true
 
   // Give mosquitto a second to start.
   // If it didn't start we might be looking for the wrong line in its output.
@@ -56,9 +81,9 @@ with_mosquitto --logger/log.Logger [block]:
   with_timeout --ms=1_000:
     mosquitto_is_running.get
 
-  // Just give it a tiny bit more time to really start up.
-  // On newer mosquitto versions we could wait for the "mosquitto version xyz running" message.
-  sleep --ms=50
+  if version.starts_with "1.":
+    // Just give it a tiny bit more time to really start up.
+    sleep --ms=50
 
   network := net.open
 

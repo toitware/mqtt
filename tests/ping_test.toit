@@ -124,5 +124,7 @@ main args:
   task:: with_internal_broker --logger=logger: test_no_timeout it logger
 
   task:: with_internal_broker --logger=logger: test_slow_write it logger
-  if test_with_mosquitto:
+  // Older mosquitto brokers have a bug that they don't see incoming bytes
+  // as activity.
+  if test_with_mosquitto and not get_mosquitto_version.starts_with "1.":
     task:: with_mosquitto --logger=logger: test_slow_write it logger
