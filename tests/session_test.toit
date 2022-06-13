@@ -230,7 +230,7 @@ test_broker_qos create_transport/Lambda --logger/log.Logger:
       created_transport
 
     // The write filter intercepts the first puback and sets the latch.
-    intercepted_latch := monitor.Latch
+    intercepted_latch := Latch
 
     ack_counter := 0
     write_filter := :: | packet/mqtt.Packet |
