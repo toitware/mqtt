@@ -189,11 +189,10 @@ test_client_qos create_transport/Lambda --logger/log.Logger:
     activity := get_activity.call
     expect (activity.any: it[0] == "reconnect")
     publish_packets := (activity.filter: it[0] == "write" and it[1] is mqtt.PublishPacket).map: it[1]
-    // We expect three packets:
+    // We expect two packets:
     // - the resent packet
     // - the packet for which we got an exception
-    // - the idle packet
-    expect_equals 3 publish_packets.size
+    expect_equals 2 publish_packets.size
     resent /mqtt.PublishPacket := publish_packets[0]
     random_topic_packet /mqtt.PublishPacket := publish_packets[1]
     expect_equals topic resent.topic
@@ -269,11 +268,10 @@ test_broker_qos create_transport/Lambda --logger/log.Logger:
       expect (activity.any: it[0] == "reconnect")
 
       publish_packets := (activity.filter: it[0] == "read" and it[1] is mqtt.PublishPacket).map: it[1]
-      // We expect three packets:
+      // We expect two packets:
       // - the initial packet
       // - the resent packet
-      // - the idle packet
-      expect_equals 3 publish_packets.size
+      expect_equals 2 publish_packets.size
       original /mqtt.PublishPacket := publish_packets[0]
       resent /mqtt.PublishPacket := publish_packets[1]
       expect_equals topic original.topic
