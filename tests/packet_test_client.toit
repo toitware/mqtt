@@ -10,6 +10,15 @@ import mqtt.packets as mqtt
 
 import .transport
 
+is_idle_packet_ activity_entry/List idle_topic/string -> bool:
+  if activity_entry[0] != "read" and activity_entry[0] != "write": return false
+  if activity_entry[1] is not mqtt.PublishPacket: return false
+  publish := activity_entry[1] as mqtt.PublishPacket
+  return publish.topic == idle_topic
+
+filter_idle_packets_ activity/List idle_topic/string -> List:
+  return activity.filter: not is_idle_packet_ it idle_topic
+
 /**
 Tests that the client and broker correctly ack packets.
 
@@ -51,6 +60,8 @@ with_packet_client create_transport/Lambda [block]
   wait_for_idle := ::
     client.publish idle_topic #[] --qos=0
     idle.down
+    client.publish idle_topic #[] --qos=0
+    idle.down
 
   task::
     exception := catch --unwind=(on_handle_error == null):
@@ -71,6 +82,6 @@ with_packet_client create_transport/Lambda [block]
   block.call client
       wait_for_idle
       :: logging_transport.clear
-      :: logging_transport.activity
+      :: filter_idle_packets_ logging_transport.activity idle_topic
 
   client.close
