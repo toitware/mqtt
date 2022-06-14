@@ -9,6 +9,25 @@ import mqtt
 import mqtt.transport as mqtt
 import net
 
+get_mosquitto_version:
+  fork_data := pipe.fork
+      true  // use_path.
+      pipe.PIPE_INHERITED  // stdin.
+      pipe.PIPE_CREATED    // stdout.
+      pipe.PIPE_INHERITED  // stderr.
+      "mosquitto"  // Program.
+      ["mosquitto", "-h"]  // Args.
+  stdout /pipe.OpenPipe := fork_data[1]
+  out_data := #[]
+  task::
+    while chunk := stdout.read:
+      out_data += chunk
+
+  pipe.wait_for fork_data[3]
+  out_str := out_data.to_string
+  first_line /string := (out_str.split "\n").first
+  return first_line.trim --left "mosquitto version "
+
 start_mosquitto:
   port /string := pipe.backticks "python" "third_party/ephemeral-port-reserve/ephemeral_port_reserve.py"
   port = port.trim
@@ -45,12 +64,30 @@ with_mosquitto --logger/log.Logger [block]:
       str := chunk.to_string.trim
       logger.debug str
       stderr_bytes += chunk
-      if str.contains "mosquitto version" and str.contains "running":
+      full_str := stderr_bytes.to_string
+      if full_str.contains "Opening ipv6 listen socket on port":
         mosquitto_is_running.set true
 
-  mosquitto_is_running.get
+  // Give mosquitto a second to start.
+  // If it didn't start we might be looking for the wrong line in its output.
+  // There was a change between 1.6.9 and 2.0.14. Could be that there is
+  // going to be another one.
+  with_timeout --ms=1_000:
+    mosquitto_is_running.get
 
   network := net.open
+
+  // Even though Mosquitto claims that it is listening (and in v2 it even claims
+  // that it is "running"), that doesn't mean that it is ready for connections
+  // yet.
+  for i := 0; i < 10; i++:
+    socket := null
+    exception := catch:
+      socket = network.tcp_connect "localhost" port
+    if socket:
+      socket.close
+      break
+    sleep --ms=(50*i)
 
   try:
     block.call:: mqtt.TcpTransport network --host="localhost" --port=port

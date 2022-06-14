@@ -21,8 +21,8 @@ Tests that the clean session flag is correctly handled.
 When the clean session flag is given, then the session should start fresh. Also, the broker
   should discard any state when the client disconnects (gracefully or not).
 
-When the clean session flag is not given, then the old session should be found (assuming there
-  is one).
+When the clean session flag is not given, then the old session should be found (assuming
+  there is one).
 */
 test_clean_session create_transport/Lambda --logger/log.Logger:
   // First connection should be clean.
