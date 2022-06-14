@@ -10,12 +10,12 @@ This implementation was created for testing, but is fully functional.
 
 import monitor
 import reader
-import writer
 import log
 import .packets
 import .last_will
 import .topic_qos
 import .topic_tree
+import .util
 
 /**
 The transport interface used by the broker.
@@ -35,11 +35,11 @@ interface ServerTransport:
 class Connection_:
   transport_ /BrokerTransport
   reader_ /reader.BufferedReader
-  writer_ /writer.Writer
+  writer_ /Writer
 
   constructor .transport_:
     reader_ = reader.BufferedReader transport_
-    writer_ = writer.Writer transport_
+    writer_ = Writer transport_
 
   read -> Packet?:
     return Packet.deserialize reader_

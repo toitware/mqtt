@@ -5,7 +5,6 @@
 import monitor
 import log
 import reader
-import writer
 
 import .session_options
 import .last_will
@@ -13,6 +12,7 @@ import .packets
 import .tcp  // For toitdoc.
 import .topic_qos
 import .transport
+import .util
 
 CLIENT_CLOSED_EXCEPTION ::= "CLIENT_CLOSED"
 
@@ -87,7 +87,7 @@ class Connection_:
 
   transport_ / ActivityMonitoringTransport
   reader_ /reader.BufferedReader
-  writer_ /writer.Writer
+  writer_ /Writer
   writing_ /monitor.Mutex ::= monitor.Mutex
   is_writing_ /bool := false
 
@@ -99,7 +99,7 @@ class Connection_:
   /** Constructs a new connection. */
   constructor .transport_ --keep_alive/Duration?:
     reader_ = reader.BufferedReader transport_
-    writer_ = writer.Writer transport_
+    writer_ = Writer transport_
     keep_alive_duration_ = keep_alive
 
 
@@ -582,7 +582,7 @@ class FullClient:
 
   Note that we allow to read the latch multiple times.
   */
-  handling_latch_ /monitor.Latch := monitor.Latch
+  handling_latch_ /Latch := Latch
 
   /**
   A mutex to queue the senders.
