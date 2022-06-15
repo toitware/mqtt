@@ -9,45 +9,93 @@ jobs:
   build:
     strategy:
       matrix:
+        os: [ "ubuntu-latest", "macos-latest", "windows-latest" ]
         toit_version: [ "v1", "v2" ]
 
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
 
     steps:
       - uses: actions/checkout@v2
 
       - name: Setup constants
+        shell: bash
         run: |
-          TOIT_V1="https://github.com/toitlang/toit/releases/download/v1.6.15/toit-linux.tar.gz"
-          TOIT_V2="https://github.com/toitlang/toit/releases/download/v2.0.0-alpha.3/toit-linux.tar.gz"
+          TOIT_V1="v1.6.15"
+          TOIT_V2="v2.0.0-alpha.4"
 
           if [[ "${{ matrix.toit_version }}" = "v1" ]]; then
-            echo "TOIT_URL=$TOIT_V1" >> $GITHUB_ENV;
+            TOIT_VERSION=$TOIT_V1
           else
-            echo "TOIT_URL=$TOIT_V2" >> $GITHUB_ENV;
+            TOIT_VERSION=$TOIT_V2
           fi
 
           export DOWNLOAD_DIR="${{ github.workspace }}/downloads"
           echo "DOWNLOAD_DIR=$DOWNLOAD_DIR" >> $GITHUB_ENV
-          echo "TOIT_EXEC=$DOWNLOAD_DIR/toit/bin/toit.run" >> $GITHUB_ENV
-          echo "TPKG_EXEC=$DOWNLOAD_DIR/toit/bin/toit.pkg" >> $GITHUB_ENV
 
-      - name: Install dependencies
+          if [[ "$RUNNER_OS" = "Linux" ]]; then
+            TOIT_FILE=toit-linux.tar.gz
+            echo "TOIT_EXEC=$DOWNLOAD_DIR/toit/bin/toit.run" >> $GITHUB_ENV
+            echo "TPKG_EXEC=$DOWNLOAD_DIR/toit/bin/toit.pkg" >> $GITHUB_ENV
+            echo "WGET=wget" >> $GITHUB_ENV
+          elif [[ "$RUNNER_OS" = "macOS" ]]; then
+            TOIT_FILE=toit-macos.tar.gz
+            echo "TOIT_EXEC=$DOWNLOAD_DIR/toit/bin/toit.run" >> $GITHUB_ENV
+            echo "TPKG_EXEC=$DOWNLOAD_DIR/toit/bin/toit.pkg" >> $GITHUB_ENV
+            echo "WGET=wget" >> $GITHUB_ENV
+          elif [[ "$RUNNER_OS" = "Windows" ]]; then
+            TOIT_FILE=toit-windows.tar.gz
+            echo "TOIT_EXEC=$DOWNLOAD_DIR/toit/bin/toit.run.exe" >> $GITHUB_ENV
+            echo "TPKG_EXEC=$DOWNLOAD_DIR/toit/bin/toit.pkg.exe" >> $GITHUB_ENV
+            echo "WGET=c:\\msys64\\usr\\bin\\wget.exe" >> $GITHUB_ENV
+          else
+            echo "UNSUPPORTED RUNNER: $RUNNER_OS"
+            exit 1
+          fi
+
+          echo "TOIT_URL=https://github.com/toitlang/toit/releases/download/$TOIT_VERSION/$TOIT_FILE" >> $GITHUB_ENV;
+
+      # Fetch the dependencies. Different for each platform.
+      - name: Install dependencies - Linux
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install ninja-build mosquitto
+          ninja --version
+          cmake --version
+          mosquitto -h || echo "ignore bad exit code"
+      - name: Install dependencies - macOS
+        if: runner.os == 'macOS'
+        run: |
+          brew install ninja mosquitto
+          ninja --version
+          cmake --version
+          mosquitto -h || echo "ignore bad exit code"
+      - name: Install dependencies - Windows
+        if: runner.os == 'Windows'
+        run: |
+          choco install ninja
+          ninja --version
+          cmake --version
 
       - name: Download Toit
+        shell: bash
         run: |
           mkdir -p "$DOWNLOAD_DIR"
           cd "$DOWNLOAD_DIR"
-          wget "$TOIT_URL"
+          $WGET "$TOIT_URL"
           tar x -f *.tar.gz
 
       - name: Run cmake
+        shell: bash
         run: |
           make rebuild-cmake
-          cmake "-DTOIT_EXEC=$TOIT_EXEC" "-DTPKG_EXEC=$TPKG_EXEC" build
+          if  [[ "$RUNNER_OS" = "Windows" ]]; then
+            # Don't know of a simple way to install mosquitto. -> Just run the tests on Windows
+            # without it.
+            cmake "-DTOIT_EXEC=$TOIT_EXEC" "-DTPKG_EXEC=$TPKG_EXEC" -DWITH_MOSQUITTO=FALSE build
+          else
+            cmake "-DTOIT_EXEC=$TOIT_EXEC" "-DTPKG_EXEC=$TPKG_EXEC" build
+          fi
 
       - name: Install packages
         run: |
