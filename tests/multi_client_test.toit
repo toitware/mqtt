@@ -51,8 +51,16 @@ test create_transport/Lambda --logger/log.Logger:
   client1.when_running: null
   client2.when_running: null
 
+  subscribed_semaphore := monitor.Semaphore
+  client1_callback = :: | packet |
+    if packet is mqtt.SubAckPacket: subscribed_semaphore.up
+  client2_callback = client1_callback
+
   client1.subscribe "2-to-1"
   client2.subscribe "1-to-2"
+
+  subscribed_semaphore.down
+  subscribed_semaphore.down
 
   done := monitor.Semaphore
 
