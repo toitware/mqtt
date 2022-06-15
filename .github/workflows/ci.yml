@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+  release:
+    types: [published]
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        toit_version: [ "v1", "v2" ]
+
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Setup constants
+        run: |
+          TOIT_V1="https://github.com/toitlang/toit/releases/download/v1.6.15/toit-linux.tar.gz"
+          TOIT_V2="https://github.com/toitlang/toit/releases/download/v2.0.0-alpha.3/toit-linux.tar.gz"
+
+          if [[ "${{ matrix.toit_version }}" = "v1" ]]; then
+            echo "TOIT_URL=$TOIT_V1" >> $GITHUB_ENV;
+          else
+            echo "TOIT_URL=$TOIT_V2" >> $GITHUB_ENV;
+          fi
+
+          export DOWNLOAD_DIR="${{ github.workspace }}/downloads"
+          echo "DOWNLOAD_DIR=$DOWNLOAD_DIR" >> $GITHUB_ENV
+          echo "TOIT_EXEC=$DOWNLOAD_DIR/toit/bin/toit.run" >> $GITHUB_ENV
+          echo "TPKG_EXEC=$DOWNLOAD_DIR/toit/bin/toit.pkg" >> $GITHUB_ENV
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install ninja-build mosquitto
+
+      - name: Download Toit
+        run: |
+          mkdir -p "$DOWNLOAD_DIR"
+          cd "$DOWNLOAD_DIR"
+          wget "$TOIT_URL"
+          tar x -f *.tar.gz
+
+      - name: Run cmake
+        run: |
+          make rebuild-cmake
+          cmake "-DTOIT_EXEC=$TOIT_EXEC" "-DTPKG_EXEC=$TPKG_EXEC" build
+
+      - name: Install packages
+        run: |
+          make install-pkgs
+
+      - name: Test
+        run: |
+          make test

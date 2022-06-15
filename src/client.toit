@@ -1,127 +1,131 @@
-// Copyright (C) 2021 Toitware ApS. All rights reserved.
+// Copyright (C) 2022 Toitware ApS. All rights reserved.
 // Use of this source code is governed by an MIT-style license that can be
 // found in the LICENSE file.
 
-import monitor
 import log
-import reader
-
-import .transport
+import .full_client
+import .session_options
+import .last_will
 import .packets
-import .topic_filter
-import .tcp  // For toitdoc.
+import .tcp // For toitdoc.
+import .transport
+import .topic_qos
+import .topic_tree
 
-CLIENT_CLOSED_EXCEPTION ::= "CLIENT_CLOSED"
-
-/**
-MQTT v3.1.1 Client with support for QoS 0 and 1.
-
-All received messages are processed by a single call to $handle:
-
-  client := mqtt.Client ...
-  task::
-    client.handle: | topic/string payload/ByteArray |
-      print "Received message on topic '$topic': $payload"
-
-Calls to $subscribe can be done at any time, with new messages arriving
-  at the existing call to $handle.
-
-If the client is closed, $handle will gracefully return. Any other ongoing
-  calls will throw an exception.
-*/
 class Client:
-  static DEFAULT_KEEP_ALIVE ::= Duration --s=60
+  client_ /FullClient
 
-  transport_/Transport
-  logger_/log.Logger
-  keep_alive_/Duration?
-
-  next_packet_id_/int? := 1  // Field is `null` when client is closed.
-  last_sent_us_/int := ?
-  task_ := null
-
-  connected_/monitor.Latch ::= monitor.Latch
-  sending_/monitor.Mutex ::= monitor.Mutex
-  incoming_/monitor.Channel ::= monitor.Channel 8
-  pending_/Map/*<int, monitor.Latch>*/ ::= {:}
+  subscription_callbacks_ /TopicTree := TopicTree
+  logger_ /log.Logger
 
   /**
-  Constructs an MQTT client.
+  Constructs a new routing MQTT client.
 
-  The $client_id (client identifier) will be used by the broker to identify a client.
-    It should be unique per broker and can be between 1 and 23 characters long.
-    Only characters and numbers are allowed
-
-  The $transport_ parameter is used to send messages and is usually a TCP socket instance.
+  The $transport parameter is used to send messages and is usually a TCP socket instance.
     See $TcpTransport.
 
-  If necessary, the $username/$password credentials can be used to authenticate.
-
-  The $keep_alive informs the server of the maximum duration between two packets.
-    The client automatically sends PINGREQ messages when necessary. If the value is
-    lower, then the server detects disconnects faster, but the client needs to send
-    more messages.
-
-  When provided, the $last_will configuration is used to send when the client
-    disconnects ungracefully.
+  The $routes must be a map from topic (of type $string) to callback. After the client started, it
+    will automatically subscribe to all topics in the map (with a max-qos of 1). If the broker already
+    has a session for this client (which can only happen if the $SessionOptions.clean_session flag
+    is not set), then the client might receive messages for these topics before there was any time to
+    call $subscribe, which is why it's a good idea to set the routes in the constructor.
   */
   constructor
-      client_id/string
-      .transport_
-      --logger=log.default
-      --username/string?=null
-      --password/string?=null
-      --keep_alive/Duration=DEFAULT_KEEP_ALIVE
-      --last_will/LastWill?=null:
-    keep_alive_ = keep_alive
+      --transport /Transport
+      --logger /log.Logger = log.default
+      --routes /Map = {:}:
     logger_ = logger
-    // Initialize with the current time.
-    // We are doing a connection request just below.
-    last_sent_us_ = Time.monotonic_us
-
-    task_ = task --background::
-      try:
-        catch --trace=(: should_trace_exception_ it):
-          run_
-      finally:
-        task_ = null
-        close
-
-    connect := ConnectPacket client_id
-        --username=username
-        --password=password
-        --keep_alive=keep_alive
-        --last_will=last_will
-    transport_.send connect
-    ack/ConnAckPacket := connected_.get
-    if ack.return_code != 0:
-      close
-      throw "connection refused: $ack.return_code"
+    client_ = FullClient --transport=transport --logger=logger
+    routes.do: | topic/string callback/Lambda |
+      max_qos := 1
+      subscription_callbacks_.set topic (CallbackEntry_ callback max_qos)
 
   /**
-  Closes the MQTT client.
+  Variant of $(start --options).
+
+  Starts the client with default session options.
+  If $client_id is given, uses it as the client ID. Otherwise, changes the
+    'clean_session' flag of the options to true, and lets the broker choose a
+    fresh client ID.
   */
-  close:
-    if is_closed: return
-    // Mark as closed.
-    next_packet_id_ = null
-    // We need to be able to close even when canceled, so we run the
-    // close steps in a critical region.
-    critical_do:
-      // TODO(anders): The incoming buffer can be full in which case this will
-      // block. All we want to achieve is to unblock the corresponding call to
-      // receive, so the task stuck in $handle can continue.
-      incoming_.send null
-      catch --trace=(: should_trace_exception_ it):
-        send_ DisconnectPacket
-      pending_.do --values: it.set null
-      if task_: task_.cancel
+  start -> none
+      --client_id /string = ""
+      --background /bool = false
+      --on_error /Lambda = (:: throw it)
+      --catch_all_callback /Lambda? = null:
+    clean_session := client_id == ""
+    options := SessionOptions --client_id=client_id --clean_session=clean_session
+    start --options=options
+        --background=background
+        --on_error=on_error
+        --catch_all_callback=catch_all_callback
 
   /**
-  Whether the client is closed.
+  Starts the client with the given $options.
+
+  If $background is true, then the handler task won't keep the program running
+    if it is the only task left.
+
+  The $on_error callback is called when an error occurs.
+    The error is passed as the first argument to the callback.
+
+  The $catch_all_callback is called when a message is received for a topic for which
+    no callback is registered.
   */
+  start -> none
+      --options /SessionOptions
+      --background /bool = false
+      --on_error /Lambda = (:: throw it)
+      --catch_all_callback /Lambda? = null:
+    client_.connect --options=options
+    task --background=background::
+      exception := catch --trace:
+        client_.handle: handle_packet_ it --catch_all_callback=catch_all_callback
+      if exception: on_error.call exception
+    client_.when_running:
+      subscribe_all_callbacks_
+
+  /**
+  Subscribes to all callbacks in the topic tree.
+  */
+  subscribe_all_callbacks_ -> none:
+    subscription_callbacks_.do: | topic/string callback_entry/CallbackEntry_ |
+      subscribe topic callback_entry.callback --max_qos=callback_entry.max_qos
+
+  handle_packet_ packet/Packet --catch_all_callback/Lambda?:
+    // We ack the packet as soon as we call the registered callback.
+    // This ensures that packets are acked in order (as required by the MQTT protocol).
+    // It does not guarantee that the packet was correctly handled. If the callback
+    // throws, the packet is not handled again.
+    client_.ack packet
+
+    if packet is PublishPacket:
+      publish := packet as PublishPacket
+      topic := publish.topic
+      payload := publish.payload
+      was_executed := false
+      subscription_callbacks_.do --most_specialized topic: | callback_entry |
+        callback_entry.callback.call topic payload
+        was_executed = true
+      if not was_executed:
+        // This can happen when the user unsubscribed from this topic but the
+        // packet was already in the incoming queue.
+        if catch_all_callback:
+          catch_all_callback.call topic payload
+        else:
+          logger_.info "received packet for unregistered topic $topic"
+      return
+
+    if packet is SubAckPacket:
+      suback := packet as SubAckPacket
+      if (suback.qos.any: it == SubAckPacket.FAILED_SUBSCRIPTION_QOS):
+        logger_.error "at least one subscription failed"
+
+    // Ignore all other packets.
+
+  /** Whether the client is closed. */
   is_closed -> bool:
-    return next_packet_id_ == null
+    return client_.is_closed
 
   /**
   Publishes an MQTT message on $topic.
@@ -136,129 +140,72 @@ class Client:
   The $retain parameter lets the MQTT broker know whether it should retain this message. A new (later)
     subscription to this $topic would receive the retained message, instead of needing to wait for
     a new message on that topic.
+
+  Not all MQTT brokers support $retain.
   */
   publish topic/string payload/ByteArray --qos=1 --retain=false:
-    if is_closed: throw CLIENT_CLOSED_EXCEPTION
-    packet_id := qos > 0 ? next_packet_id_++ : null
-
-    packet := PublishPacket
-        topic
-        payload
-        --qos=qos
-        --retain=retain
-        --packet_id=packet_id
-
-    // If we don't have a packet identifier (QoS == 0), don't wait for an ack.
-    if not packet_id:
-      send_ packet
-      return
-
-    wait_for_ack_ packet_id: | latch/monitor.Latch |
-      send_ packet
-      ack := latch.get
-      if not ack: throw CLIENT_CLOSED_EXCEPTION
+    client_.publish topic payload --qos=qos --retain=retain
 
   /**
-  Subscribe to a single topic $filter, with the provided $qos.
+  Subscribes to a single $topic, with the provided $max_qos.
 
-  See $publish for an explanation of the different QOS values.
+  The chosen $max_qos is the maximum QoS the client will receive. The broker
+    generally sends a packet to subscribers with the same QoS as the one it
+    received it with. The $max_qos parameter sets a limit on which QoS the client
+    wants to receive.
+
+  See $publish for an explanation of the different QoS values.
+
+  The $callback will be called with the topic and the payload of received messages.
+
+  If the client is already connected, still sends another request to the broker to
+    subscribe to the topic. This can be useful to obtain retained packets.
   */
-  subscribe filter/string --qos/int:
-    subscribe [TopicFilter filter --qos=qos]
+  subscribe topic/string --max_qos/int=1 callback/Lambda:
+    topics := [ TopicQos topic --max_qos=max_qos ]
+    if topics.is_empty: throw "INVALID_ARGUMENT"
+    callback_entry := CallbackEntry_ callback max_qos
+    subscription_callbacks_.set topic callback_entry
+    client_.subscribe_all topics
 
   /**
-  Subscribe to a list a $topic_filters.
+  Unsubscribes from a single $topic.
 
-  Each topic filter has its own QoS, that the server will verify
-    before returning.
+  If the broker has a subscription (see $subscribe) of the given $topic, it will be removed.
+
+  The client removes the callback immediately. If messages for this topic were in transit, they
+    are only caught by the catch-all handler.
   */
-  subscribe topic_filters/List:
-    if is_closed: throw CLIENT_CLOSED_EXCEPTION
-    packet_id := next_packet_id_++
-    packet := SubscribePacket topic_filters --packet_id=packet_id
-    wait_for_ack_ packet_id: | latch/monitor.Latch |
-      send_ packet
-      ack /SubAckPacket? := latch.get
-      if ack:
-        ack.qos.do:
-          if it == SubAckPacket.FAILED_SUBSCRIPTION_QOS:
-            throw "subscription failed"
-      else:
-        throw CLIENT_CLOSED_EXCEPTION
-
-  /** Unsubscribes from a single topic $filter. */
-  unsubscribe filter/string -> none:
-    unsubscribe_all [filter]
-
-  /** Unsubscribes from the list of topic $filters. */
-  unsubscribe_all filters/List -> none:
-    if is_closed: throw CLIENT_CLOSED_EXCEPTION
-    packet_id := next_packet_id_++
-    packet := UnsubscribePacket filters --packet_id=packet_id
-    wait_for_ack_ packet_id: | latch/monitor.Latch |
-      send_ packet
-      ack := latch.get
-      if not ack: throw CLIENT_CLOSED_EXCEPTION
+  unsubscribe topic/string -> none:
+    unsubscribe_all [topic]
 
   /**
-  Handle incoming messages. The $block is called with two arguments,
-    the topic (a string) and the payload (a ByteArray).
+  Unsubscribes from all $topics in the given list.
+
+  For each topic in the list of $topics, the broker checks whether it has a
+    a subscription (see $subscribe), and removes it if it exists.
+
+  The client removes the callback immediately. If messages for this topic were in transit, they
+    are only caught by the catch-all handler.
   */
-  handle [block]:
-    while true:
-      publish/PublishPacket? := incoming_.receive
-      if not publish: return
-      block.call publish.topic publish.payload
-      if publish.packet_id:
-        ack := PubAckPacket publish.packet_id
-        send_ ack
+  unsubscribe_all topics/List -> none:
+    client_.unsubscribe_all topics
+    topics.do:
+      subscription_callbacks_.remove it
 
-  send_ packet/Packet:
-    // Any number of different tasks can start sending packets. It
-    // is critical that the packet bits sent over the transport stream
-    // aren't interleaved, so we use a mutex to serialize the sends.
-    sending_.do:
-      transport_.send packet
-      last_sent_us_ = Time.monotonic_us
+  /**
+  Closes the client.
 
-  wait_for_ack_ packet_id [block]:
-    latch := monitor.Latch
-    pending_[packet_id] = latch
-    try:
-      block.call latch
-    finally:
-      pending_.remove packet_id
+  Unless $force is true, just sends a disconnect packet to the broker. The client then
+    shuts down gracefully once the broker has closed the connection.
 
-  run_:
-    while not task.is_canceled:
-      remaining_keep_alive_us := keep_alive_.in_us - (Time.monotonic_us - last_sent_us_)
-      packet := ?
-      if remaining_keep_alive_us <= 0:
-        packet = null
-      else:
-        remaining_keep_alive := Duration --us=remaining_keep_alive_us
-        // Timeout returns a `null` packet.
-        packet = transport_.receive --timeout=remaining_keep_alive
+  If $force is true, shuts down the client by severing the transport.
+  */
+  close --force/bool=false -> none:
+    client_.close --force=force
 
-      if packet == null:
-        ping := PingReqPacket
-        send_ ping
-      else if packet is ConnAckPacket:
-        connected_.set packet
-      else if packet is PublishPacket:
-        publish := packet as PublishPacket
-        incoming_.send publish
-      else if packet is PacketIDAck:
-        ack := packet as PacketIDAck
-        pending_.get ack.packet_id
-            --if_present=: it.set ack
-            --if_absent=: logger_.info "unmatched packet id: $ack.packet_id"
-      else if packet is PingRespPacket:
-        // Do nothing.
-      else:
-        throw "unhandled packet type: $packet.type"
+class CallbackEntry_:
+  callback /Lambda
+  max_qos /int
 
-  static should_trace_exception_ exception/any -> bool:
-    if exception == "NOT_CONNECTED": return false
-    if exception == reader.UNEXPECTED_END_OF_READER_EXCEPTION: return false
-    return true
+  constructor .callback .max_qos:

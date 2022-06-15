@@ -3,8 +3,10 @@
 // found in the LICENSE file.
 
 import .client
+import .full_client
+import .session_options
 import .tcp
-import .topic_filter
-import .packets show LastWill
+import .last_will
+import .topic_qos
 
 export *
