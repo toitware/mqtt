@@ -77,12 +77,16 @@ jobs:
           ninja --version
           cmake --version
 
-      - name: Download Toit
+      - uses: suisei-cn/actions-download-file@v1
+        name: Download Toit
+        with:
+          url: ${{ env.TOIT_URL }}
+          target: ${{ env.DOWNLOAD_DIR }}
+
+      - name: Extract Toit
         shell: bash
         run: |
-          mkdir -p "$DOWNLOAD_DIR"
           cd "$DOWNLOAD_DIR"
-          $WGET "$TOIT_URL"
           tar x -f *.tar.gz
 
       - name: Run cmake
