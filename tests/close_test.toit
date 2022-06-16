@@ -200,7 +200,10 @@ test create_transport/Lambda --logger/log.Logger:
   close_in_handle create_transport --logger=logger --no-force
   close_in_handle create_transport --logger=logger --force
 
-main:
+main args:
+  test_with_mosquitto := args.contains "--mosquitto"
+  if test_with_mosquitto: return
+
   log_level := log.ERROR_LEVEL
   logger := log.default.with_level log_level
 

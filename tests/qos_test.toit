@@ -158,5 +158,5 @@ main args:
   logger := log.default.with_level log_level
 
   run_test := : | create_transport/Lambda | test create_transport --logger=logger
-  with_internal_broker --logger=logger run_test
   if test_with_mosquitto: with_mosquitto --logger=logger run_test
+  else: with_internal_broker --logger=logger run_test

@@ -114,17 +114,17 @@ main args:
   log_level := log.ERROR_LEVEL
   logger := log.default.with_level log_level
 
-  // Run the three tests in parallel, as they are mostly sleeping.
+  // Run the tests in parallel, as they are mostly sleeping.
 
-  task:: with_internal_broker --logger=logger: test it logger
   if test_with_mosquitto:
     task:: with_mosquitto --logger=logger: test it logger
+    // Older mosquitto brokers have a bug that they don't see incoming bytes
+    // as activity.
+    if not get_mosquitto_version.starts_with "1.":
+      task:: with_mosquitto --logger=logger: test_slow_write it logger
 
-  // We can't test the no-timeout test with mosquitto, as it doesn't support 0 keep-alive.
-  task:: with_internal_broker --logger=logger: test_no_timeout it logger
-
-  task:: with_internal_broker --logger=logger: test_slow_write it logger
-  // Older mosquitto brokers have a bug that they don't see incoming bytes
-  // as activity.
-  if test_with_mosquitto and not get_mosquitto_version.starts_with "1.":
-    task:: with_mosquitto --logger=logger: test_slow_write it logger
+  else:
+    task:: with_internal_broker --logger=logger: test it logger
+    task:: with_internal_broker --logger=logger: test_slow_write it logger
+    // We can't test the no-timeout test with mosquitto, as it doesn't support 0 keep-alive.
+    task:: with_internal_broker --logger=logger: test_no_timeout it logger

@@ -322,7 +322,10 @@ test_disconnect:
   disconnect := mqtt.DisconnectPacket
   deserialized := (test_roundtrip disconnect) as mqtt.DisconnectPacket
 
-main:
+main args:
+  test_with_mosquitto := args.contains "--mosquitto"
+  if test_with_mosquitto: return
+
   test_connect
   test_connack
   test_publish
