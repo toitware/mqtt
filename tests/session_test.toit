@@ -141,13 +141,6 @@ test_client_qos create_transport/Lambda --logger/log.Logger:
       --clean_session:
     null
 
-  created_transport /mqtt.Transport? := null
-
-  // Intercept the transport creation, so we can close the transport from the outside.
-  create_transport_intercept := ::
-    created_transport = create_transport.call
-    created_transport
-
   // The read filter intercepts the first puback and sets the latch.
   intercepted_latch := Latch
   read_filter := :: | packet/mqtt.Packet |
@@ -170,7 +163,6 @@ test_client_qos create_transport/Lambda --logger/log.Logger:
       --write_filter = write_filter
       --no-clean_session
       --logger=logger: | client/mqtt.FullClient wait_for_idle/Lambda clear/Lambda get_activity/Lambda |
-    assert: created_transport != null
 
     wait_for_idle.call
     clear.call
@@ -221,13 +213,6 @@ test_broker_qos create_transport/Lambda --logger/log.Logger:
         --clean_session:
       null
 
-    created_transport /mqtt.Transport? := null
-
-    // Intercept the transport creation, so we can close the transport from the outside.
-    create_transport_intercept := ::
-      created_transport = create_transport.call
-      created_transport
-
     // The write filter intercepts the first puback and sets the latch.
     intercepted_latch := Latch
 
@@ -245,7 +230,6 @@ test_broker_qos create_transport/Lambda --logger/log.Logger:
         --write_filter = write_filter
         --no-clean_session
         --logger=logger: | client/mqtt.FullClient wait_for_idle/Lambda clear/Lambda get_activity/Lambda |
-      assert: created_transport != null
 
       client.subscribe topic
       wait_for_idle.call
