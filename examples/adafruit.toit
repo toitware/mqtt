@@ -19,6 +19,7 @@ import net
 import certificate_roots
 
 ADAFRUIT_IO_USERNAME ::= "<YOUR_USERNAME>"
+
 // From io.adafruit.com/$ADAFRUIT_IO_USERNAME/dashboards -> click "My Key"
 ADAFRUIT_IO_KEY ::= "<YOUR_KEY>"
 
@@ -47,7 +48,7 @@ main:
 
   client.start --options=options
 
-  print "connected to broker"
+  print "Connected to broker"
 
   topic := "$ADAFRUIT_IO_USERNAME/feeds/$ADAFRUIT_IO_FEEDNAME"
 
