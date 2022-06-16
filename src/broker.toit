@@ -32,13 +32,32 @@ interface ServerTransport:
   listen callback/Lambda -> none
   close -> none
 
+/**
+A reader that can timeout.
+*/
+class TimeoutReader_ implements reader.Reader:
+  wrapped_ /reader.Reader
+  timeout_ /Duration? := null
+
+  constructor .wrapped_:
+
+  read -> ByteArray?:
+    if timeout_:
+      with_timeout timeout_: return wrapped_.read
+    return wrapped_.read
+
+  set_timeout timeout/Duration:
+    timeout_ = timeout
+
 class Connection_:
   transport_ /BrokerTransport
+  timeout_reader_ /TimeoutReader_
   reader_ /reader.BufferedReader
   writer_ /Writer
 
   constructor .transport_:
-    reader_ = reader.BufferedReader transport_
+    timeout_reader_ = TimeoutReader_ transport_
+    reader_ = reader.BufferedReader timeout_reader_
     writer_ = Writer transport_
 
   read -> Packet?:
@@ -49,6 +68,10 @@ class Connection_:
 
   close -> none:
     transport_.close
+
+  set_read_timeout duration/Duration:
+    timeout_reader_.set_timeout duration
+
 
 monitor QueuedMessages_:
   // Messages that haven't been sent yet.
@@ -121,15 +144,14 @@ class Session_:
     last_will_ = last_will
 
     connection_ = connection
+
+    if not keep_alive.is_zero:
+      connection.set_read_timeout (keep_alive * 2)
+
     reader_task_ = task::
       exception := catch --trace:
         while true:
-          packet := null
-          if keep_alive == (Duration --s=0):
-            packet = connection.read
-          else:
-            with_timeout --ms=(keep_alive.in_ms * 2):
-              packet = connection.read
+          packet := connection.read
           if not packet and state_ != STATE_DISCONNECTED_: throw "CLIENT_DISCONNECTED"
           logger_.debug "received $(Packet.debug_string_ packet) from client $client_id"
           try:
