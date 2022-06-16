@@ -36,17 +36,14 @@ jobs:
             TOIT_FILE=toit-linux.tar.gz
             echo "TOIT_EXEC=$DOWNLOAD_DIR/toit/bin/toit.run" >> $GITHUB_ENV
             echo "TPKG_EXEC=$DOWNLOAD_DIR/toit/bin/toit.pkg" >> $GITHUB_ENV
-            echo "WGET=wget" >> $GITHUB_ENV
           elif [[ "$RUNNER_OS" = "macOS" ]]; then
             TOIT_FILE=toit-macos.tar.gz
             echo "TOIT_EXEC=$DOWNLOAD_DIR/toit/bin/toit.run" >> $GITHUB_ENV
             echo "TPKG_EXEC=$DOWNLOAD_DIR/toit/bin/toit.pkg" >> $GITHUB_ENV
-            echo "WGET=wget" >> $GITHUB_ENV
           elif [[ "$RUNNER_OS" = "Windows" ]]; then
             TOIT_FILE=toit-windows.tar.gz
             echo "TOIT_EXEC=$DOWNLOAD_DIR/toit/bin/toit.run.exe" >> $GITHUB_ENV
             echo "TPKG_EXEC=$DOWNLOAD_DIR/toit/bin/toit.pkg.exe" >> $GITHUB_ENV
-            echo "WGET=c:\\msys64\\usr\\bin\\wget.exe" >> $GITHUB_ENV
           else
             echo "UNSUPPORTED RUNNER: $RUNNER_OS"
             exit 1
