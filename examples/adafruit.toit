@@ -10,7 +10,7 @@ Adafruit is free, but has some limitations. For example, one can only publish
 
 Before running this program:
 - create an account at https://io.adafruit.com/
-- create a feed: https://io.adafruit.com/floitsch_toit/feeds
+- create a feed: https://io.adafruit.com/$ADAFRUIT_IO_USERNAME/feeds (replace the $ADAFRUIT_IO_USERNAME with your username)
 - update the $ADAFRUIT_IO_USERNAME, $ADAFRUIT_IO_KEY, and $ADAFRUIT_IO_FEEDNAME constants.
 */
 
