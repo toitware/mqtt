@@ -56,7 +56,7 @@ class SlowTransport implements mqtt.Transport:
 
   write bytes/ByteArray -> int:
     if should_write_slowly:
-      sleep --ms=100
+      sleep --ms=200
       wrapped_.write bytes[0..1]
       return 1
     else:
