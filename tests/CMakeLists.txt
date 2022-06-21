@@ -28,15 +28,22 @@ add_custom_target(
   USES_TERMINAL
 )
 
-if (${WITH_MOSQUITTO})
-  set(MOSQUITTO_FLAG "--mosquitto")
-endif()
-
 foreach(file ${TESTS})
   add_test(
     NAME ${file}
-    COMMAND "${TOIT_EXEC}" "${file}" ${MOSQUITTO_FLAG}
+    COMMAND "${TOIT_EXEC}" "${file}"
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
     )
   set_tests_properties(${file} PROPERTIES TIMEOUT ${TEST_TIMEOUT})
+
+  if (${WITH_MOSQUITTO})
+    set(test_name "${file}-mosquitto")
+    add_test(
+      NAME "${test_name}"
+      COMMAND "${TOIT_EXEC}" "${file}" --mosquitto
+      WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+      )
+    set_tests_properties(${test_name} PROPERTIES TIMEOUT ${TEST_TIMEOUT})
+  endif()
+
 endforeach()
