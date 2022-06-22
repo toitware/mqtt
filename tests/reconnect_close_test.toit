@@ -218,7 +218,6 @@ test_reconnect_after_broker_disconnect create_transport/Lambda --logger/log.Logg
     disconnecting_transport.on_read = :: | wrapped |
       is_disconnected ? null : wrapped.read
 
-
     wait_for_idle.call
     clear.call
 
