@@ -677,7 +677,13 @@ class FullClient:
           // much more likely that we first disconnected, and then called $close for
           // another reason (like timeout).
           if not is_closed:
-            throw reader.UNEXPECTED_END_OF_READER_EXCEPTION
+            logger_.info "disconnect from server"
+            // Reset the connection and try again.
+            // The loop will call `do_connected_` which will ensure that we reconnect if
+            // that's possible.
+            connection_.close
+            continue
+
           // The user called 'close'. Doesn't mean it was always completely graceful, but
           // good enough.
           break

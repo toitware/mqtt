@@ -15,11 +15,12 @@ import .packet_test_client
 import .transport
 import .util
 
-class CloseTestTransport implements mqtt.Transport:
+class TestTransport implements mqtt.Transport:
   wrapped_ /mqtt.Transport
 
   on_reconnect /Lambda? := null
   on_write /Lambda? := null
+  on_read /Lambda? := null
 
   constructor .wrapped_:
 
@@ -27,7 +28,10 @@ class CloseTestTransport implements mqtt.Transport:
     if on_write: on_write.call bytes
     return wrapped_.write bytes
 
-  read -> ByteArray?: return wrapped_.read
+  read -> ByteArray?:
+    if on_read: return on_read.call wrapped_
+    return wrapped_.read
+
   close -> none: wrapped_.close
   supports_reconnect -> bool: return wrapped_.supports_reconnect
   reconnect -> none:
@@ -40,11 +44,11 @@ class CloseTestTransport implements mqtt.Transport:
 Tests that the client closes as if it was a forced close if the connection is down.
 */
 test_no_disconnect_packet create_transport/Lambda --logger/log.Logger:
-  failing_transport /CloseTestTransport? := null
+  failing_transport /TestTransport? := null
 
   create_failing_transport := ::
     transport := create_transport.call
-    failing_transport = CloseTestTransport transport
+    failing_transport = TestTransport transport
     failing_transport
 
   second_attempt_delay := Duration --s=10
@@ -110,11 +114,11 @@ This is different from $test_no_disconnect_packet, as the client already managed
   sends a disconnect instead of abruptly closing the connection.
 */
 test_reconnect_before_disconnect_packet create_transport/Lambda --logger/log.Logger:
-  brittle_transport /CloseTestTransport? := null
+  brittle_transport /TestTransport? := null
 
   create_brittle_transport := ::
     transport := create_transport.call
-    brittle_transport = CloseTestTransport transport
+    brittle_transport = TestTransport transport
     brittle_transport
 
   reconnection_strategy := mqtt.DefaultSessionReconnectionStrategy --attempt_delays=[ Duration.ZERO ]
@@ -191,6 +195,46 @@ close_in_handle create_transport/Lambda --logger/log.Logger --force/bool:
 
   handle_done.get
 
+test_reconnect_after_broker_disconnect create_transport/Lambda --logger/log.Logger:
+  disconnecting_transport /TestTransport? := null
+
+  create_failing_transport := ::
+    transport := create_transport.call
+    disconnecting_transport = TestTransport transport
+    disconnecting_transport
+
+  with_packet_client create_failing_transport
+      --client_id = "disconnect-client1"
+      --no-clean_session
+      --logger=logger: | client/mqtt.FullClient wait_for_idle/Lambda clear/Lambda get_activity/Lambda |
+
+    reconnect_was_attempted := Latch
+    is_disconnected := false
+
+    disconnecting_transport.on_reconnect = ::
+      is_disconnected = false
+      if not reconnect_was_attempted.has_value: reconnect_was_attempted.set true
+
+    disconnecting_transport.on_read = :: | wrapped |
+      is_disconnected ? null : wrapped.read
+
+    wait_for_idle.call
+    clear.call
+
+    // Disconnect. From the client's side it looks as if the broker disconnected.
+    is_disconnected = true
+
+    // The test-transport already started reading from the wrapped transport, so just
+    // changing the boolean doesn't yet have any effect. We need to receive a packet first.
+    // After that, the client will try to read again and see the disconnect.
+
+    // We are sending a packet with QOS=1.
+    // This will lead to a QoS response from the broker, after which the 'is_disconnected' will trigger.
+    client.publish "trigger a packet" #[] --qos=1
+
+    // At this point we hope to see a reconnection attempt.
+    reconnect_was_attempted.get
+
 /**
 Tests the client's close function.
 */
@@ -199,6 +243,7 @@ test create_transport/Lambda --logger/log.Logger:
   test_reconnect_before_disconnect_packet create_transport --logger=logger
   close_in_handle create_transport --logger=logger --no-force
   close_in_handle create_transport --logger=logger --force
+  test_reconnect_after_broker_disconnect create_transport --logger=logger
 
 main args:
   test_with_mosquitto := args.contains "--mosquitto"
