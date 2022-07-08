@@ -160,7 +160,7 @@ class TestTransport implements mqtt.Transport:
   read_filter_ /Lambda?
   write_filter_ /Lambda?
 
-  read_task_ /Task_? := null
+  read_task_ := null
   read_channel_ /monitor.Channel := monitor.Channel 20
 
   /**
