@@ -119,8 +119,10 @@ class Session_:
 
   subscription_tree_ /TopicTree ::= TopicTree
   connection_ /Connection_? := null
-  reader_task_ /Task_? := null
-  writer_task_ /Task_? := null
+  // TODO(florian): the following fields should be typed as `Task?`.
+  // However, that class is only available in Toit 2.0.
+  reader_task_ /any := null
+  writer_task_ /any := null
 
   queued_ /QueuedMessages_ ::= QueuedMessages_
 

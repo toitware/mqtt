@@ -94,7 +94,9 @@ class Connection_:
   closing_reason_ /any := null
 
   keep_alive_duration_ /Duration?
-  activity_task_ /Task_? := null
+  // TODO(florian): the following field should be typed as `Task?`.
+  // However, that class is only available in Toit 2.0.
+  activity_task_ /any := null
 
   /** Constructs a new connection. */
   constructor .transport_ --keep_alive/Duration?:
