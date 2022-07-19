@@ -611,7 +611,7 @@ class FullClient:
   constructor
       --transport /Transport
       --logger /log.Logger = log.default:
-    transport_ = ActivityMonitoringTransport.private_(transport)
+    transport_ = ActivityMonitoringTransport.private_ transport
     logger_ = logger
 
   /**
