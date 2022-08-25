@@ -56,7 +56,7 @@ abstract class Packet:
 
   ensure_drained_ -> none:
     // Most packets drain the reader they deserialize from eagerly, but
-    // for we allow streaming the payload for a few. For those, we
+    // we allow streaming the payload for a few types. For those, we
     // override this method and make sure the whole payload has been
     // drained when we're done processing a packet.
 
@@ -260,8 +260,8 @@ class PublishPacket extends Packet:
   topic /string
   packet_id /int?
 
-  reader_ / PublishPacketReader_? := ?
-  payload_ / ByteArray? := ?
+  reader_ /PublishPacketReader_? := ?
+  payload_ /ByteArray? := ?
 
   constructor.deserialize_ reader/reader.BufferedReader size/int flags/int:
     retain := flags & 0b0001 != 0
@@ -339,9 +339,9 @@ class PublishPacket extends Packet:
         --duplicate = duplicate != null ? duplicate : this.duplicate
 
 class PublishPacketReader_ implements reader.SizedReader:
-  reader_ / reader.BufferedReader
-  size / int
-  remaining_ / int? := null
+  reader_ /reader.BufferedReader
+  size /int
+  remaining_ /int? := null
 
   constructor .reader_ .size:
 
