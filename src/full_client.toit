@@ -694,6 +694,7 @@ class FullClient:
           unacked_packet_ = packet
           try:
             on_packet.call packet
+            packet.ensure_drained_
             if is_running and unacked_packet_: ack unacked_packet_
           finally:
             unacked_packet_ = null

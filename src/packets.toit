@@ -54,6 +54,12 @@ abstract class Packet:
 
   abstract payload -> ByteArray
 
+  ensure_drained_ -> none:
+    // Most packets drain the reader they deserialize from eagerly, but
+    // for we allow streaming the payload for a few. For those, we
+    // override this method and make sure the whole payload has been
+    // drained when we're done processing a packet.
+
   serialize -> ByteArray:
     buffer := bytes.Buffer
     buffer.put_byte type << 4 | flags
@@ -252,8 +258,10 @@ class PublishPacket extends Packet:
   static TYPE ::= 3
 
   topic /string
-  payload /ByteArray
   packet_id /int?
+
+  reader_ / PublishPacketReader_? := ?
+  payload_ / ByteArray? := ?
 
   constructor.deserialize_ reader/reader.BufferedReader size/int flags/int:
     retain := flags & 0b0001 != 0
@@ -266,12 +274,33 @@ class PublishPacket extends Packet:
       size -= 2
     else:
       packet_id = null
-    payload = reader.read_bytes size
+    reader_ = PublishPacketReader_ reader size
+    payload_ = null
     super TYPE --flags=(duplicate ? 0b1000 : 0) | (qos << 1) | (retain ? 1 : 0)
 
-  constructor .topic .payload --qos/int --retain/bool --.packet_id --duplicate=false:
+  constructor .topic payload/ByteArray --qos/int --retain/bool --.packet_id --duplicate=false:
+    reader_ = null
+    payload_ = payload
     super TYPE
         --flags=(duplicate ? 0b1000 : 0) | (qos << 1) | (retain ? 1 : 0)
+
+  payload -> ByteArray:
+    payload := payload_
+    if payload: return payload
+    payload = reader_.read_payload_
+    if not payload: throw "Already streaming payload"
+    payload_ = payload
+    reader_ = null
+    return payload
+
+  payload_stream -> reader.SizedReader:
+    if payload_: throw "Already read payload"
+    return reader_.stream_
+
+  ensure_drained_ -> none:
+    if not reader_: return
+    reader_.drain_
+    reader_ = null
 
   variable_header -> ByteArray:
     buffer := bytes.Buffer
@@ -308,6 +337,39 @@ class PublishPacket extends Packet:
         --retain = retain != null ? retain : this.retain
         --packet_id = new_packet_id
         --duplicate = duplicate != null ? duplicate : this.duplicate
+
+class PublishPacketReader_ implements reader.SizedReader:
+  reader_ / reader.BufferedReader
+  size / int
+  remaining_ / int? := null
+
+  constructor .reader_ .size:
+
+  read -> ByteArray?:
+    remaining := remaining_
+    assert: remaining != null  // Should have called $stream_ already.
+    if remaining == 0: return null
+    bytes := reader_.read --max_size=remaining
+    if bytes: remaining_ = remaining - bytes.size
+    return bytes
+
+  stream_ -> reader.SizedReader:
+    if remaining_ == null: remaining_ = size
+    return this
+
+  drain_ -> none:
+    remaining := remaining_
+    if remaining == 0: return
+    reader_.skip (remaining or size)
+    remaining_ = 0
+
+  read_payload_ -> ByteArray?:
+    // If we already started streaming from the underlying reader,
+    // we cannot produce a payload.
+    if remaining_ != null: return null
+    payload := reader_.read_bytes size
+    remaining_ = 0
+    return payload
 
 class PubAckPacket extends Packet:
   static TYPE ::= 4
