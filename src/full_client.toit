@@ -290,9 +290,6 @@ abstract class DefaultReconnectionStrategyBase implements ReconnectionStrategy:
         return with_timeout receive_connect_timeout_:
           receive_connect_ack.call
 
-      // TODO(kasper): Is this meaningful? I don't think so.
-      if is_closed: return null
-
     unreachable
 
   abstract connect -> none
