@@ -290,6 +290,7 @@ abstract class DefaultReconnectionStrategyBase implements ReconnectionStrategy:
         return with_timeout receive_connect_timeout_:
           receive_connect_ack.call
 
+      // TODO(kasper): Is this meaningful? I don't think so.
       if is_closed: return null
 
     unreachable
@@ -967,6 +968,8 @@ class FullClient:
       assert: exception != null
       if is_closed: throw CLIENT_CLOSED_EXCEPTION
       reconnect_ --is_initial_connection=false
+      // TODO(kasper): We can get here in a closed state. Is that really weird or
+      // completely intentional?
 
   refused_reason_for_return_code_ return_code/int -> string:
     refused_reason := "CONNECTION_REFUSED"

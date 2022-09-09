@@ -99,7 +99,6 @@ monitor TestTransportPipe:
   client_is_closed -> bool:
     return is_closed_
 
-
   broker_write bytes/ByteArray -> none:
     if is_closed_: throw "CLOSED"
     broker_to_client_data_.add bytes

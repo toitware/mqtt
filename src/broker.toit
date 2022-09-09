@@ -154,16 +154,24 @@ class Session_:
       exception := catch --trace:
         while true:
           packet := connection.read
-          if not packet and state_ != STATE_DISCONNECTED_: throw "CLIENT_DISCONNECTED"
+          if not packet and state_ != STATE_DISCONNECTED_:
+            // TODO(kasper): There appears to be a possible race condition with the code
+            // in test_reconnect_after_broker_disconnect if there is a window from realizing
+            // that the client has disconnected and when we update the state to reflect it.
+            // The stack trace processing associated with the 'catch --trace' that would
+            // be in play if this clause throw the exception might yield.
+            disconnect --reason="CLIENT_DISCONNECTED"
+            break
           logger_.debug "received $(Packet.debug_string_ packet) from client $client_id"
           try:
+            // TODO(kasper): Is this really necessary? You would already get the tracing
+            // from the catch clause that wraps the whole loop.
             catch --trace --unwind=true:
               handle packet
           finally: | is_exception _ |
             if is_exception:
               logger_.error "error handling packet $(Packet.debug_string_ packet)"
-
-      disconnect --reason=exception
+      if exception: disconnect --reason=exception
 
     writer_task_ = task::
       exception := catch --trace:
@@ -310,6 +318,7 @@ class Session_:
       NO_PACKET_ID ::= -1  // See $PublishPacket.with.
       packet_id := qos > 0 ? next_packet_id_++ : NO_PACKET_ID
       send_ (packet.with --packet_id=packet_id --qos=qos)
+
 /** An unbounded channel for publish messages. */
 class PublishChannel_:
   // Messages that haven't been sent yet.
