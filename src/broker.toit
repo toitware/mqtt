@@ -155,19 +155,12 @@ class Session_:
         while true:
           packet := connection.read
           if not packet and state_ != STATE_DISCONNECTED_:
-            // TODO(kasper): There appears to be a possible race condition with the code
-            // in test_reconnect_after_broker_disconnect if there is a window from realizing
-            // that the client has disconnected and when we update the state to reflect it.
-            // The stack trace processing associated with the 'catch --trace' that would
-            // be in play if this clause throw the exception might yield.
+            logger_.info "client $client_id disconnected"
             disconnect --reason="CLIENT_DISCONNECTED"
             break
           logger_.debug "received $(Packet.debug_string_ packet) from client $client_id"
           try:
-            // TODO(kasper): Is this really necessary? You would already get the tracing
-            // from the catch clause that wraps the whole loop.
-            catch --trace --unwind=true:
-              handle packet
+            handle packet
           finally: | is_exception _ |
             if is_exception:
               logger_.error "error handling packet $(Packet.debug_string_ packet)"
@@ -296,13 +289,16 @@ class Session_:
 
     if clean_session: broker.remove_session_ client_id
 
-    if reader_task_:
-      reader_task_.cancel
-      reader_task_ = null
+    // Cancel the writer_task_ first, since the reader task might be
+    // the one calling the disconnect.
+    assert: writer_task_ != task
     if writer_task_:
       writer_task_.cancel
       writer_task_ = null
-
+    if reader_task_:
+      reader_task := reader_task_
+      reader_task_ = null
+      reader_task.cancel
 
   send_ packet/Packet:
     queued_.add_packet packet
