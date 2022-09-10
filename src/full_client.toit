@@ -290,8 +290,6 @@ abstract class DefaultReconnectionStrategyBase implements ReconnectionStrategy:
         return with_timeout receive_connect_timeout_:
           receive_connect_ack.call
 
-      if is_closed: return null
-
     unreachable
 
   abstract connect -> none
@@ -967,6 +965,11 @@ class FullClient:
       assert: exception != null
       if is_closed: throw CLIENT_CLOSED_EXCEPTION
       reconnect_ --is_initial_connection=false
+      // While trying to reconnect there might have been a 'close' call.
+      // Since we managed to connect, the 'close' call was too late to intervene with
+      // the connection attempt. As such we consider the reconnection a success (as if
+      // it happened before the 'close' call), and we continue.
+      // There will be a 'disconnect' packet that will close the connection to the broker.
 
   refused_reason_for_return_code_ return_code/int -> string:
     refused_reason := "CONNECTION_REFUSED"

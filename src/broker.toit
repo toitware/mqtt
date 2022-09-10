@@ -154,16 +154,17 @@ class Session_:
       exception := catch --trace:
         while true:
           packet := connection.read
-          if not packet and state_ != STATE_DISCONNECTED_: throw "CLIENT_DISCONNECTED"
+          if not packet and state_ != STATE_DISCONNECTED_:
+            logger_.info "client $client_id disconnected"
+            disconnect --reason="CLIENT_DISCONNECTED"
+            break
           logger_.debug "received $(Packet.debug_string_ packet) from client $client_id"
           try:
-            catch --trace --unwind=true:
-              handle packet
+            handle packet
           finally: | is_exception _ |
             if is_exception:
               logger_.error "error handling packet $(Packet.debug_string_ packet)"
-
-      disconnect --reason=exception
+      if exception: disconnect --reason=exception
 
     writer_task_ = task::
       exception := catch --trace:
@@ -288,13 +289,16 @@ class Session_:
 
     if clean_session: broker.remove_session_ client_id
 
-    if reader_task_:
-      reader_task_.cancel
-      reader_task_ = null
+    // Cancel the writer_task_ first, since the reader task might be
+    // the one calling the disconnect.
+    assert: writer_task_ != task
     if writer_task_:
       writer_task_.cancel
       writer_task_ = null
-
+    if reader_task_:
+      reader_task := reader_task_
+      reader_task_ = null
+      reader_task.cancel
 
   send_ packet/Packet:
     queued_.add_packet packet
@@ -310,6 +314,7 @@ class Session_:
       NO_PACKET_ID ::= -1  // See $PublishPacket.with.
       packet_id := qos > 0 ? next_packet_id_++ : NO_PACKET_ID
       send_ (packet.with --packet_id=packet_id --qos=qos)
+
 /** An unbounded channel for publish messages. */
 class PublishChannel_:
   // Messages that haven't been sent yet.
