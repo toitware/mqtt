@@ -98,6 +98,10 @@ class Connection_:
   // However, that class is only available in Toit 2.0.
   activity_task_ /any := null
 
+  // When the 'peek' method is called, we store the packet here.
+  // A future read just uses the packet.
+  peeked_/Packet? := null
+
   /** Constructs a new connection. */
   constructor .transport_ --keep_alive/Duration?:
     reader_ = reader.BufferedReader transport_
@@ -125,9 +129,22 @@ class Connection_:
         activity_task_ = null
 
   /**
+  Reads the next incoming packet, but does not consume it.
+  A future $read call will return the same packet.
+  */
+  peek -> Packet:
+    peeked_ = read
+    return peeked_
+
+  /**
   Receives an incoming packet.
   */
   read -> Packet?:
+    if peeked_:
+      result := peeked_
+      peeked_ = null
+      return result
+
     if is_closed: throw CLIENT_CLOSED_EXCEPTION
     try:
       catch --unwind=(: not is_closed):
@@ -697,7 +714,10 @@ class FullClient:
           finally:
             unacked_packet_ = null
         else if packet is ConnAckPacket:
-          logger_.info "spurious conn-ack packet"
+          // Most of the time we don't expect to see a conn-ack packet here, but
+          // when a broker sends a different packet as first packet, we will
+          // receive it here.
+          // Ignore.
         else if packet is PingRespPacket:
           // Ignore.
         else if packet is PubAckPacket:
@@ -1017,20 +1037,29 @@ class FullClient:
                   --last_will=session_.options.last_will
               connection_.write packet
             --receive_connect_ack = :
-              response := connection_.read
+              response := connection_.peek
               if not response: throw "CONNECTION_CLOSED"
-              ack := (response as ConnAckPacket)
-              return_code := ack.return_code
-              if return_code != 0:
-                refused_reason := refused_reason_for_return_code_ return_code
-                connection_.close --reason=refused_reason
-                // The broker refused the connection. This means that the
-                // problem isn't due to a bad connection but almost certainly due to
-                // some bad arguments (like a bad client-id). As such don't try to reconnect
-                // again and just give up.
-                close --force
-                throw refused_reason
-              ack.session_present
+              if response is not ConnAckPacket:
+                // The broker sent a different packet (most likely a PubAckPacket).
+                // This should only happen if there is already a session for us.
+                // We don't actually wait for the ConnAckPacket, but simply
+                // assume that there is a session.
+                true
+              else:
+                // Actually consume the packet. It's not strictly necessary, but
+                // since we know that it is a ConnAckPacket, we might as well.
+                ack := (connection_.read as ConnAckPacket)
+                return_code := ack.return_code
+                if return_code != 0:
+                  refused_reason := refused_reason_for_return_code_ return_code
+                  connection_.close --reason=refused_reason
+                  // The broker refused the connection. This means that the
+                  // problem isn't due to a bad connection but almost certainly due to
+                  // some bad arguments (like a bad client-id). As such don't try to reconnect
+                  // again and just give up.
+                  close --force
+                  throw refused_reason
+                ack.session_present
             --disconnect = :
               connection_.write DisconnectPacket
       finally: | is_exception exception |
