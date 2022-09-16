@@ -132,7 +132,7 @@ class Connection_:
   Reads the next incoming packet, but does not consume it.
   A future $read call will return the same packet.
   */
-  peek -> Packet:
+  peek -> Packet?:
     peeked_ = read
     return peeked_
 
