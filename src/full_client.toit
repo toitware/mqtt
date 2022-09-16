@@ -416,7 +416,11 @@ class Session_:
     persistence_store_.remove_persisted_with_id id
 
   next_packet_id -> int:
-    return next_packet_id_++
+    while true:
+      candidate := next_packet_id_
+      next_packet_id_ = (next_packet_id_ + 1) & 0xFFFF
+      // Only use the candidate if we are not waiting for an ACK of that id.
+      if not persistence_store_.get candidate: return candidate
 
   /**
   Runs over the pending packets.

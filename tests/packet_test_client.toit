@@ -77,7 +77,7 @@ with_packet_client create_transport/Lambda [block]
 
   client.when_running:
     client.subscribe idle_topic --max_qos=0
-    wait_for_idle.call
+    // wait_for_idle.call
 
   block.call client
       wait_for_idle
