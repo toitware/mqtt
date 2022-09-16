@@ -431,7 +431,7 @@ class Session_:
 /**
 A persistence strategy for the MQTT client.
 
-Note that the client does not automatically resend old messages when it starts up.
+Note that the client does *not* automatically resend old messages when it starts up.
 This is also true if the client tries to connect reusing an existing session, but
   the session has expired. In these cases, the user must manually resend the old
   messages.
@@ -439,13 +439,11 @@ This is also true if the client tries to connect reusing an existing session, bu
 interface PersistenceStore:
   /**
   Stores the publish-packet information in the persistent store.
-  Returns a persistent-store id which can be used to $get or
-    $remove_persisted_with_id the data from the store.
   */
   add packet/PersistedPacket -> none
 
   /**
-  Finds the persistent packet with $persisted_id and returns it.
+  Finds the persistent packet with $packet_id and returns it.
 
   If no such packet exists, returns null.
 
@@ -453,15 +451,15 @@ interface PersistenceStore:
   The MQTT protocol does not explicitly allow to drop packets. However,
     most brokers should do fine with it.
   */
-  get persisted_id/int -> PersistedPacket?
+  get packet_id/int -> PersistedPacket?
 
   /**
-  Removes the data for the packet with $persisted_id.
-  Does nothing if there is no data associated to $persisted_id.
+  Removes the data for the packet with $packet_id.
+  Does nothing if there is no data associated to $packet_id.
 
   Returns whether the store contained the id.
   */
-  remove_persisted_with_id persisted_id/int -> bool
+  remove_persisted_with_id packet_id/int -> bool
 
   /**
   Calls the given block for each stored packet.
@@ -489,10 +487,7 @@ A persistence store that stores the packets in memory.
 */
 class MemoryPersistenceStore implements PersistenceStore:
   /**
-  A map from persistent id to $PersistedPacket.
-
-  It is crucial that the map is in insertion order.
-  The last entry of the map must have the highest persistent-id.
+  A map from packet id to $PersistedPacket.
   */
   storage_ /Map := {:}
 
@@ -500,11 +495,11 @@ class MemoryPersistenceStore implements PersistenceStore:
     id := packet.packet_id
     storage_[id] = packet
 
-  get persisted_id/int -> PersistedPacket?:
-    return storage_.get persisted_id
+  get packet_id/int -> PersistedPacket?:
+    return storage_.get packet_id
 
-  remove_persisted_with_id persisted_id/int -> bool:
-    storage_.remove persisted_id --if_absent=: return false
+  remove_persisted_with_id packet_id/int -> bool:
+    storage_.remove packet_id --if_absent=: return false
     return true
 
   /**
