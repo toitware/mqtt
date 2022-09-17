@@ -11,16 +11,13 @@ import mqtt
 import net
 
 main:
-  socket := net.open.tcp_connect "127.0.0.1" 1883
-  client := mqtt.Client
-    "toit-client-id"
-    mqtt.TcpTransport socket
+  transport := mqtt.TcpTransport net.open --host="127.0.0.1"
+  client := mqtt.Client --transport=transport
 
-  task::
-    client.handle: | topic/string payload/ByteArray |
-      print "Received message on topic '$topic': $payload"
+  client.start --client_id="toit-client-id"
 
-  client.subscribe "device/events" --qos=1
+  client.subscribe "device/events":: | topic/string payload/ByteArray |
+    print "Received: $topic: $payload.to_string_non_throwing"
 
-  client.publish "device/data" "Hello World".to_byte_array
+  client.publish "device/data" "Hello, world!".to_byte_array
 ```
