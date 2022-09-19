@@ -418,9 +418,10 @@ class Session_:
   next_packet_id -> int:
     while true:
       candidate := next_packet_id_
-      next_packet_id_ = (next_packet_id_ + 1) & 0xFFFF
-      // Only use the candidate if we are not waiting for an ACK of that id.
-      if not persistence_store_.get candidate: return candidate
+      next_packet_id_ = (candidate + 1) & ((1 << PublishPacket.ID_BIT_SIZE) - 1)
+      // If we are waiting for an ACK of the candidate id, pick a different one.
+      if persistence_store_.get candidate: continue
+      return candidate
 
   /**
   Runs over the pending packets.
