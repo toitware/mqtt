@@ -274,9 +274,11 @@ abstract class DefaultReconnectionStrategyBase implements ReconnectionStrategy:
       [--reconnect_transport]
       [--send_connect]
       [--receive_connect_ack]:
-    for i := reuse_connection ? -1 : 0; i < attempt_delays_.size; i++:
+    for i := -1; i < attempt_delays_.size; i++:
       if is_closed: return null
-      if i >= 0:
+      if i == -1 and not reuse_connection:
+        reconnect_transport.call
+      else if i >= 0:
         sleep_duration := attempt_delays_[i]
         closed_signal_.wait --timeout=sleep_duration
         if is_closed: return null
