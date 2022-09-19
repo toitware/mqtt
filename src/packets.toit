@@ -255,6 +255,7 @@ class ConnAckPacket extends Packet:
   payload -> ByteArray: return #[]
 
 class PublishPacket extends Packet:
+  static ID_BIT_SIZE ::= 16
   static TYPE ::= 3
 
   topic /string
