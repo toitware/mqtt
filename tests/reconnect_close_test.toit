@@ -101,9 +101,12 @@ test_no_disconnect_packet create_transport/Lambda --logger/log.Logger:
     activity := get_activity.call
     // We never connected again.
     expect (activity.filter: it[0] == "write" and it[1] is mqtt.ConnectPacket).is_empty
-    // There should be at most 1 reconnect attempt. (In theory there could be a race condition, but
-    // the timeout for trying again is 10s, so that's quite high).
-    expect (activity.filter: it[0] == "reconnect").size <= 1
+    // There should be at most 2 reconnect attempt.
+    // One without delay, when trying to reconnect.
+    // Then another after the first delay (0ms) has elapsed.
+    // The third attempt should only happen after 10s, and the program should have finished
+    // at this point.
+    expect (activity.filter: it[0] == "reconnect").size <= 2
 
 
 /**

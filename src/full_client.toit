@@ -270,12 +270,15 @@ abstract class DefaultReconnectionStrategyBase implements ReconnectionStrategy:
   Returns whether the broker had a session for this client, otherwise.
   */
   do_connect transport/ActivityMonitoringTransport
+      --reuse_connection/bool=false
       [--reconnect_transport]
       [--send_connect]
       [--receive_connect_ack]:
     for i := -1; i < attempt_delays_.size; i++:
       if is_closed: return null
-      if i >= 0:
+      if i == -1 and not reuse_connection:
+        reconnect_transport.call
+      else if i >= 0:
         sleep_duration := attempt_delays_[i]
         closed_signal_.wait --timeout=sleep_duration
         if is_closed: return null
@@ -334,6 +337,7 @@ class DefaultCleanSessionReconnectionStrategy extends DefaultReconnectionStrateg
     // The clean session does not reconnect.
     if not is_initial_connection: throw "INVALID_STATE"
     session_exists := do_connect transport
+        --reuse_connection = is_initial_connection
         --reconnect_transport = reconnect_transport
         --send_connect = send_connect
         --receive_connect_ack = receive_connect_ack
@@ -364,6 +368,7 @@ class DefaultSessionReconnectionStrategy extends DefaultReconnectionStrategyBase
       [--receive_connect_ack]
       [--disconnect]:
     session_exists := do_connect transport
+        --reuse_connection = is_initial_connection
         --reconnect_transport = reconnect_transport
         --send_connect = send_connect
         --receive_connect_ack = receive_connect_ack
