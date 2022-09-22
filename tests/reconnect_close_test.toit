@@ -51,8 +51,14 @@ test_no_disconnect_packet create_transport/Lambda --logger/log.Logger:
     failing_transport = TestTransport transport
     failing_transport
 
-  second_attempt_delay := Duration --s=10
-  reconnection_strategy := mqtt.DefaultSessionReconnectionStrategy --attempt_delays=[ Duration.ZERO, second_attempt_delay ]
+  // There will be a reconnection attempt immediately when the connection fails.
+  // The second and third attempts are delayed as follows:
+  second_attempt_delay := Duration --ms=1
+  third_attempt_delay := Duration --s=10
+  reconnection_strategy := mqtt.DefaultSessionReconnectionStrategy --attempt_delays=[
+    second_attempt_delay,
+    third_attempt_delay
+  ]
   with_packet_client create_failing_transport
       --client_id = "disconnect-client1"
       --no-clean_session
@@ -92,7 +98,7 @@ test_no_disconnect_packet create_transport/Lambda --logger/log.Logger:
     // for the second attempt.
     client.close
     close_duration := Duration.since start_time
-    expect close_duration < second_attempt_delay
+    expect close_duration < third_attempt_delay
 
     expect client.is_closed
 
@@ -101,9 +107,9 @@ test_no_disconnect_packet create_transport/Lambda --logger/log.Logger:
     activity := get_activity.call
     // We never connected again.
     expect (activity.filter: it[0] == "write" and it[1] is mqtt.ConnectPacket).is_empty
-    // There should be at most 2 reconnect attempt.
+    // There should be at most 2 reconnect attempts.
     // One without delay, when trying to reconnect.
-    // Then another after the first delay (0ms) has elapsed.
+    // Then another after the first delay (1ms) has elapsed.
     // The third attempt should only happen after 10s, and the program should have finished
     // at this point.
     expect (activity.filter: it[0] == "reconnect").size <= 2
