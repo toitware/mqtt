@@ -98,7 +98,7 @@ test_no_disconnect_packet create_transport/Lambda --logger/log.Logger:
     // for the second attempt.
     client.close
     close_duration := Duration.since start_time
-    expect close_duration < second_attempt_delay
+    expect close_duration < third_attempt_delay
 
     expect client.is_closed
 
