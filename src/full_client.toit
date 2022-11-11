@@ -252,6 +252,8 @@ abstract class DefaultReconnectionStrategyBase implements ReconnectionStrategy:
 
   is_closed_ := false
 
+  logger_/log.Logger
+
   /**
   A latch that is set when the client is closed.
   */
@@ -259,9 +261,11 @@ abstract class DefaultReconnectionStrategyBase implements ReconnectionStrategy:
 
   constructor
       --receive_connect_timeout /Duration = DEFAULT_RECEIVE_CONNECT_TIMEOUT
-      --attempt_delays /List /*Duration*/ = DEFAULT_ATTEMPT_DELAYS:
+      --attempt_delays /List /*Duration*/ = DEFAULT_ATTEMPT_DELAYS
+      --logger/log.Logger?=log.default:
     receive_connect_timeout_ = receive_connect_timeout
     attempt_delays_ = attempt_delays
+    logger_ = logger
 
   /**
   Tries to connect, potentially retrying with delays.
@@ -276,22 +280,29 @@ abstract class DefaultReconnectionStrategyBase implements ReconnectionStrategy:
       [--receive_connect_ack]:
     for i := -1; i < attempt_delays_.size; i++:
       if is_closed: return null
-      if i == -1 and not reuse_connection:
-        reconnect_transport.call
-      else if i >= 0:
-        sleep_duration := attempt_delays_[i]
-        closed_signal_.wait --timeout=sleep_duration
-        if is_closed: return null
-        reconnect_transport.call
-
-      did_connect := false
-
       is_last_attempt := (i == attempt_delays_.size - 1)
 
-      catch --unwind=(: is_closed or is_last_attempt):
-        send_connect.call
-        return with_timeout receive_connect_timeout_:
-          receive_connect_ack.call
+      try:
+        catch --unwind=(: is_closed or is_last_attempt):
+          logger_.debug "Attempting to connect"
+
+          if i == -1 and not reuse_connection:
+            reconnect_transport.call
+          else if i >= 0:
+            sleep_duration := attempt_delays_[i]
+            closed_signal_.wait --timeout=sleep_duration
+            if is_closed: return null
+            reconnect_transport.call
+
+          send_connect.call
+          logger_.debug "Connected to broker"
+          return with_timeout receive_connect_timeout_:
+            result := receive_connect_ack.call
+            logger_.debug "Connection established"
+            result
+      finally: | is_exception _ |
+        if is_exception:
+          logger_.debug "Reconnection attempt failed"
 
     unreachable
 
@@ -323,9 +334,12 @@ Since the broker will drop the session information this strategy won't reconnect
 class DefaultCleanSessionReconnectionStrategy extends DefaultReconnectionStrategyBase:
 
   constructor
+      --logger/log.Logger=log.default
       --receive_connect_timeout /Duration = DefaultReconnectionStrategyBase.DEFAULT_RECEIVE_CONNECT_TIMEOUT
       --attempt_delays /List /*Duration*/ = DefaultReconnectionStrategyBase.DEFAULT_ATTEMPT_DELAYS:
-    super --receive_connect_timeout=receive_connect_timeout --attempt_delays=attempt_delays
+    super --logger=logger
+        --receive_connect_timeout=receive_connect_timeout
+        --attempt_delays=attempt_delays
 
   connect -> none
       transport/ActivityMonitoringTransport
@@ -356,9 +370,12 @@ If the connection drops, the client tries to reconnect potentially multiple time
 */
 class DefaultSessionReconnectionStrategy extends DefaultReconnectionStrategyBase:
   constructor
+      --logger/log.Logger=log.default
       --receive_connect_timeout /Duration = DefaultReconnectionStrategyBase.DEFAULT_RECEIVE_CONNECT_TIMEOUT
       --attempt_delays /List /*Duration*/ = DefaultReconnectionStrategyBase.DEFAULT_ATTEMPT_DELAYS:
-    super --receive_connect_timeout=receive_connect_timeout --attempt_delays=attempt_delays
+    super --logger=logger
+        --receive_connect_timeout=receive_connect_timeout
+        --attempt_delays=attempt_delays
 
   connect -> none
       transport/ActivityMonitoringTransport
@@ -644,8 +661,10 @@ class FullClient:
       reconnection_strategy_ = reconnection_strategy
     else if options.clean_session:
       reconnection_strategy_ = DefaultCleanSessionReconnectionStrategy
+          --logger=logger_.with_name "reconnect"
     else:
       reconnection_strategy_ = DefaultSessionReconnectionStrategy
+          --logger=logger_.with_name "reconnect"
 
     session_ = Session_ options persistence_store
 
