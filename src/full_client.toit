@@ -401,6 +401,33 @@ class DefaultSessionReconnectionStrategy extends DefaultReconnectionStrategyBase
     return transport.supports_reconnect
 
 /**
+A reconnection strategy that keeps reconnecting.
+
+This strategy also ignores whether the broker did or did not have a session for
+  the client. See below for the consequences of ignoring session state.
+
+The strategy will keep trying to reconnect until the client is closed. The
+  delay between each connection attempt can be configured by a lambda.
+
+# Session state
+If the client reconnects, but the broker doesn't have a session for the client,
+  then this strategy continues as if nothing ever happened. This can, in
+  theory, lead to a situation where the client acknowledges messages that the
+  broker never sent. In rare cases, the client might even acknowledge a message
+  that happens to have an ID of a packet the broker just sent, but the client
+  hasn't received yet.
+  TODO(florian): Is this a protocol violation? If yes, the server could disconnect
+    us, leading to an infinite loop...
+
+Note that this can also happen to clients that don't set the clien-session flag, but
+  where the broker lost the session. This can happen because the session expired, the
+  broker crashed, or a client with the same ID connectend in the meantime with a
+  clean-session flag.
+*/
+class PersistentReconnectionStrategy extends DefaultReconnectionStrategyBase:
+
+
+/**
 An MQTT session.
 
 Keeps track of data that must survive disconnects (assuming the user didn't use
