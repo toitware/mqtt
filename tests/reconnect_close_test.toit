@@ -55,10 +55,12 @@ test_no_disconnect_packet create_transport/Lambda --logger/log.Logger:
   // The second and third attempts are delayed as follows:
   second_attempt_delay := Duration --ms=1
   third_attempt_delay := Duration --s=10
-  reconnection_strategy := mqtt.DefaultSessionReconnectionStrategy --attempt_delays=[
-    second_attempt_delay,
-    third_attempt_delay
-  ]
+  reconnection_strategy := mqtt.DefaultSessionReconnectionStrategy
+      --logger=logger.with_name "mqtt.reconnection_strategy"
+      --attempt_delays=[
+        second_attempt_delay,
+        third_attempt_delay,
+      ]
   with_packet_client create_failing_transport
       --client_id = "disconnect-client1"
       --no-clean_session
@@ -130,7 +132,9 @@ test_reconnect_before_disconnect_packet create_transport/Lambda --logger/log.Log
     brittle_transport = TestTransport transport
     brittle_transport
 
-  reconnection_strategy := mqtt.DefaultSessionReconnectionStrategy --attempt_delays=[ Duration.ZERO ]
+  reconnection_strategy := mqtt.DefaultSessionReconnectionStrategy
+      --logger=logger.with_name "mqtt.reconnection_strategy"
+      --attempt_delays=[ Duration.ZERO ]
   with_packet_client create_brittle_transport
       --client_id = "disconnect-client1"
       --no-clean_session
