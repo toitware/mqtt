@@ -248,7 +248,8 @@ abstract class DefaultReconnectionStrategyBase implements ReconnectionStrategy:
   ]
 
   receive_connect_timeout_ /Duration
-  attempt_delays_ /List
+  attempt_delays_ /List?
+  delay_lambda_/Lambda?
 
   is_closed_ := false
 
@@ -261,9 +262,12 @@ abstract class DefaultReconnectionStrategyBase implements ReconnectionStrategy:
 
   constructor
       --receive_connect_timeout /Duration = DEFAULT_RECEIVE_CONNECT_TIMEOUT
-      --attempt_delays /List /*Duration*/ = DEFAULT_ATTEMPT_DELAYS
+      --delay_lambda /Lambda? = null
+      --attempt_delays /List? /*Duration*/ = (delay_lambda ? null : DEFAULT_ATTEMPT_DELAYS)
       --logger/log.Logger?=log.default:
+    if delay_lambda and attempt_delays: throw "BOTH_DELAY_LAMBDAS_AND_DELAYS"
     receive_connect_timeout_ = receive_connect_timeout
+    delay_lambda_ = delay_lambda
     attempt_delays_ = attempt_delays
     logger_ = logger
 
@@ -278,20 +282,33 @@ abstract class DefaultReconnectionStrategyBase implements ReconnectionStrategy:
       [--reconnect_transport]
       [--send_connect]
       [--receive_connect_ack]:
-    for i := -1; i < attempt_delays_.size; i++:
+    attempt_counter := -1
+    while true:
       if is_closed: return null
-      is_last_attempt := (i == attempt_delays_.size - 1)
+
+      attempt_counter++
+
+      is_last_attempt := false
+      if attempt_delays_:
+        is_last_attempt = (attempt_counter == attempt_delays_.size)
 
       try:
         catch --unwind=(: is_closed or is_last_attempt):
-          logger_.debug "Attempting to connect"
 
-          if i == -1 and not reuse_connection:
-            reconnect_transport.call
-          else if i >= 0:
-            sleep_duration := attempt_delays_[i]
+          if attempt_counter == 0:
+            // In the first iteration we try to connect without delay.
+            if not reuse_connection:
+              logger_.debug "Attempting to reconnect"
+              reconnect_transport.call
+          else:
+            sleep_duration/Duration := ?
+            if attempt_delays_:
+              sleep_duration = attempt_delays_[attempt_counter - 1]
+            else:
+              sleep_duration = delay_lambda_.call attempt_counter
             closed_signal_.wait --timeout=sleep_duration
             if is_closed: return null
+            logger_.debug "Attempting to reconnect"
             reconnect_transport.call
 
           send_connect.call
@@ -336,9 +353,11 @@ class DefaultCleanSessionReconnectionStrategy extends DefaultReconnectionStrateg
   constructor
       --logger/log.Logger=log.default
       --receive_connect_timeout /Duration = DefaultReconnectionStrategyBase.DEFAULT_RECEIVE_CONNECT_TIMEOUT
-      --attempt_delays /List /*Duration*/ = DefaultReconnectionStrategyBase.DEFAULT_ATTEMPT_DELAYS:
+      --delay_lambda /Lambda? = null
+      --attempt_delays /List? /*Duration*/ = null:
     super --logger=logger
         --receive_connect_timeout=receive_connect_timeout
+        --delay_lambda=delay_lambda
         --attempt_delays=attempt_delays
 
   connect -> none
@@ -372,9 +391,11 @@ class DefaultSessionReconnectionStrategy extends DefaultReconnectionStrategyBase
   constructor
       --logger/log.Logger=log.default
       --receive_connect_timeout /Duration = DefaultReconnectionStrategyBase.DEFAULT_RECEIVE_CONNECT_TIMEOUT
-      --attempt_delays /List /*Duration*/ = DefaultReconnectionStrategyBase.DEFAULT_ATTEMPT_DELAYS:
+      --delay_lambda /Lambda? = null
+      --attempt_delays /List? = null:
     super --logger=logger
         --receive_connect_timeout=receive_connect_timeout
+        --delay_lambda=delay_lambda
         --attempt_delays=attempt_delays
 
   connect -> none
@@ -396,6 +417,69 @@ class DefaultSessionReconnectionStrategy extends DefaultReconnectionStrategyBase
     // Disconnect and throw. If the user wants to, they should create a new client.
     catch: disconnect.call
     throw "SESSION_EXPIRED"
+
+  should_try_reconnect transport/ActivityMonitoringTransport -> bool:
+    return transport.supports_reconnect
+
+/**
+A reconnection strategy that keeps reconnecting.
+
+This strategy also ignores whether the broker did or did not have a session for
+  the client. See below for the consequences of ignoring session state.
+
+The strategy will keep trying to reconnect until the client is closed. The
+  delay between each connection attempt can be configured by a lambda.
+
+# Session state
+If the client reconnects, but the broker doesn't have a session for the client,
+  then this strategy continues as if nothing ever happened. This can, in
+  theory, lead to a situation where the client acknowledges messages that the
+  broker never sent. In rare cases, the client might even acknowledge a message
+  that happens to have an ID of a packet the broker just sent, but the client
+  hasn't received yet.
+  Theoretically, this is a protocol violation, but most brokers just drop the packet.
+
+Note that this can also happen to clients that don't set the clien-session flag, but
+  where the broker lost the session. This can happen because the session expired, the
+  broker crashed, or a client with the same ID connectend in the meantime with a
+  clean-session flag.
+*/
+class TenaciousReconnectionStrategy extends DefaultReconnectionStrategyBase:
+  /**
+  Creates a new tenacious reconnection strategy.
+
+  The given $delay_lambda must return a Duration, representing the delay between
+    the next connection attempt. The first reconnection attempt is always
+    immediate, so this lambda is only called before the second and subsequent
+    attempts.
+
+  The $receive_connect_timeout is the timeout given for the CONNECT packet to
+    arrive at the client.
+  */
+  constructor
+      --logger/log.Logger=log.default
+      --receive_connect_timeout /Duration = DefaultReconnectionStrategyBase.DEFAULT_RECEIVE_CONNECT_TIMEOUT
+      --delay_lambda /Lambda:
+    super --logger=logger
+        --receive_connect_timeout=receive_connect_timeout
+        --delay_lambda=delay_lambda
+
+  connect -> none
+      transport/ActivityMonitoringTransport
+      --is_initial_connection /bool
+      [--reconnect_transport]
+      [--send_connect]
+      [--receive_connect_ack]
+      [--disconnect]:
+    session_exists := do_connect transport
+        --reuse_connection = is_initial_connection
+        --reconnect_transport = reconnect_transport
+        --send_connect = send_connect
+        --receive_connect_ack = receive_connect_ack
+
+    // We don't care if the session exists or not.
+    // This strategy just wants to reconnect.
+    return
 
   should_try_reconnect transport/ActivityMonitoringTransport -> bool:
     return transport.supports_reconnect
@@ -790,8 +874,12 @@ class FullClient:
 
     state_ = STATE_DISCONNECTED_
 
-    // There might be an attempt of reconnecting in progress.
-    // By closing here, we make that attempt shorter (if it fails).
+    // We might be calling close from within the reconnection-strategy's callback.
+    // If the connection is currently not alive simply force-close.
+    if not connection_.is_alive:
+      close_force_
+      return
+
     reconnection_strategy_.close
 
     sending_.do:
