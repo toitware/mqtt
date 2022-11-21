@@ -539,6 +539,10 @@ class Session_:
   do --pending/bool [block] -> none:
     persistence_store_.do block
 
+  pending_count -> int:
+    return persistence_store_.size
+
+
 /**
 A persistence strategy for the MQTT client.
 
@@ -584,6 +588,11 @@ interface PersistenceStore:
     However, most brokers can probably deal with it.
   */
   do [block] -> none
+
+  /**
+  The amount of stored packets.
+  */
+  size -> int
 
 class PersistedPacket:
   packet_id /int
@@ -707,6 +716,11 @@ class FullClient:
   unacked_packet_ /Packet? := null
 
   /**
+  A signal that is triggered whenever a packet acknowledgement is received.
+  */
+  ack_received_signal_ /monitor.Signal := monitor.Signal
+
+  /**
   Constructs an MQTT client.
 
   The client starts disconnected. Call $connect, followed by $handle to initiate
@@ -816,6 +830,7 @@ class FullClient:
           // earlier attempt to send it.
           session_.handle_ack id
               --if_absent=: logger_.info "unmatched packet id: $id"
+          ack_received_signal_.raise
         else:
           logger_.info "unexpected packet of type $packet.type"
     finally:
@@ -946,6 +961,8 @@ class FullClient:
   */
   publish topic/string payload/ByteArray --qos/int=1 --retain/bool=false -> none:
     if topic == "" or topic.contains "+" or topic.contains "#": throw "INVALID_ARGUMENT"
+    if qos == 1:
+      ack_received_signal_.wait: session_.pending_count < session_.options.max_inflight
     packet_id := send_publish_ topic payload --qos=qos --retain=retain
     if qos == 1:
       session_.set_pending_ack topic payload --packet_id=packet_id --retain=retain
