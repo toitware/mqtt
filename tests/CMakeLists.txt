@@ -7,7 +7,7 @@ file(GLOB TESTS RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "*_test.toit")
 set(TOIT_EXEC "toit.run" CACHE FILEPATH "The executable used to run the tests")
 set(TPKG_EXEC "toit.pkg" CACHE FILEPATH "The executable used to install the packages")
 set(TEST_TIMEOUT 40 CACHE STRING "The maximal amount of time each test is allowed to run")
-set(WITH_MOSQUITTO TRUE CACHE BOOL "Whether the tests should run with mosquitto")
+set(WITH_MOSQUITTO TRUE CACHE BOOL "Whether the tests should also run with mosquitto")
 
 add_custom_target(
   "install-pkgs"
