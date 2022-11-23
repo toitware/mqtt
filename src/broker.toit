@@ -29,6 +29,10 @@ interface BrokerTransport implements reader.Reader:
 The transport interface allowing the broker to listen to incoming connections.
 */
 interface ServerTransport:
+  /**
+  Listens for incoming connections and calls the $callback whenever a client connects.
+  Calls the $callback with a $BrokerTransport as argument.
+  */
   listen callback/Lambda -> none
   close -> none
 
