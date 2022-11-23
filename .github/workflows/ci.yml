@@ -10,7 +10,6 @@ jobs:
     strategy:
       matrix:
         os: [ "ubuntu-latest", "macos-latest", "windows-latest" ]
-        toit_version: [ "v1", "v2" ]
 
     runs-on: ${{ matrix.os }}
 
@@ -20,14 +19,7 @@ jobs:
       - name: Setup constants
         shell: bash
         run: |
-          TOIT_V1="v1.6.15"
-          TOIT_V2="v2.0.0-alpha.4"
-
-          if [[ "${{ matrix.toit_version }}" = "v1" ]]; then
-            TOIT_VERSION=$TOIT_V1
-          else
-            TOIT_VERSION=$TOIT_V2
-          fi
+          TOIT_VERSION="v2.0.0-alpha.41"
 
           export DOWNLOAD_DIR="${{ github.workspace }}/downloads"
           echo "DOWNLOAD_DIR=$DOWNLOAD_DIR" >> $GITHUB_ENV
