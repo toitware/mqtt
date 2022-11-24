@@ -52,12 +52,14 @@ class Client:
       --client_id /string = ""
       --background /bool = false
       --on_error /Lambda = (:: throw it)
+      --reconnection_strategy /ReconnectionStrategy? = null
       --catch_all_callback /Lambda? = null:
     clean_session := client_id == ""
     options := SessionOptions --client_id=client_id --clean_session=clean_session
     start --options=options
         --background=background
         --on_error=on_error
+        --reconnection_strategy=reconnection_strategy
         --catch_all_callback=catch_all_callback
 
   /**
@@ -71,13 +73,20 @@ class Client:
 
   The $catch_all_callback is called when a message is received for a topic for which
     no callback is registered.
+
+  If a $reconnection_strategy is provided, uses it for reconnection attempts.
+    Otherwise, uses the $TenaciousReconnectionStrategy with a delay of the number
+    of attempts in seconds.
   */
   start -> none
       --options /SessionOptions
       --background /bool = false
       --on_error /Lambda = (:: throw it)
+      --reconnection_strategy /ReconnectionStrategy? = null
       --catch_all_callback /Lambda? = null:
-    client_.connect --options=options
+    reconnection_strategy = reconnection_strategy or
+        TenaciousReconnectionStrategy --delay_lambda=:: Duration --s=it
+    client_.connect --options=options --reconnection_strategy=reconnection_strategy
     task --background=background::
       exception := catch --trace:
         client_.handle: handle_packet_ it --catch_all_callback=catch_all_callback

@@ -253,7 +253,8 @@ Tests the client's close function.
 */
 test create_transport/Lambda --logger/log.Logger:
   test_no_disconnect_packet create_transport --logger=logger
-  test_reconnect_before_disconnect_packet create_transport --logger=logger
+  // TODO(floitsch): reenable this test.
+  // test_reconnect_before_disconnect_packet create_transport --logger=logger
   close_in_handle create_transport --logger=logger --no-force
   close_in_handle create_transport --logger=logger --force
   test_reconnect_after_broker_disconnect create_transport --logger=logger
