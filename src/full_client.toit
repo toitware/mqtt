@@ -53,7 +53,7 @@ class ActivityChecker_:
       return keep_alive_
 
   run:
-    while not task.is_canceled and not connection_.is_closed:
+    while not Task.current.is_canceled and not connection_.is_closed:
       catch:
         duration := check
         sleep duration
@@ -773,7 +773,7 @@ class FullClient:
 
     try:
       handling_latch_.set true
-      while not task.is_canceled:
+      while not Task.current.is_canceled:
         packet /Packet? := null
         catch --unwind=(: not state_ == STATE_DISCONNECTED_ and not state_ == STATE_CLOSING_):
           do_connected_ --allow_disconnected: packet = connection_.read
@@ -1064,7 +1064,7 @@ class FullClient:
   */
   do_connected_ --allow_disconnected/bool=false [block]:
     if is_closed and not (allow_disconnected and state_ == STATE_DISCONNECTED_): throw CLIENT_CLOSED_EXCEPTION
-    while not task.is_canceled:
+    while not Task.current.is_canceled:
       // If the connection is still alive, or if the manager doesn't want us to reconnect, let the
       // exception go through.
       should_abandon := :
