@@ -34,6 +34,7 @@ with_packet_client create_transport/Lambda [block]
     --keep_alive /Duration = (Duration --s=10_000) // Mosquitto doesn't support 0-duration keep-alives.
     --reconnection_strategy /mqtt.ReconnectionStrategy? = null
     --persistence_store /mqtt.PersistenceStore? = null
+    --max_inflight /int? = null
     --on_handle_error /Lambda? = null
     --read_filter /Lambda? = null
     --write_filter /Lambda? = null:
@@ -47,6 +48,7 @@ with_packet_client create_transport/Lambda [block]
       --client_id = client_id
       --keep_alive = keep_alive
       --clean_session = clean_session
+      --max_inflight = max_inflight
   client.connect --options=options
       --persistence_store = persistence_store
       --reconnection_strategy = reconnection_strategy
