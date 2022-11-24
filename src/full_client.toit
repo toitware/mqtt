@@ -249,7 +249,7 @@ abstract class DefaultReconnectionStrategyBase implements ReconnectionStrategy:
 
   receive_connect_timeout_ /Duration
   attempt_delays_ /List?
-  delay_lambda_/Lambda?
+  delay_lambda_ /Lambda?
 
   is_closed_ := false
 
@@ -298,7 +298,7 @@ abstract class DefaultReconnectionStrategyBase implements ReconnectionStrategy:
           if attempt_counter == 0:
             // In the first iteration we try to connect without delay.
             if not reuse_connection:
-              logger_.debug "Attempting to reconnect"
+              logger_.debug "Attempting to (re)connect"
               reconnect_transport.call
           else:
             sleep_duration/Duration := ?
@@ -308,7 +308,7 @@ abstract class DefaultReconnectionStrategyBase implements ReconnectionStrategy:
               sleep_duration = delay_lambda_.call attempt_counter
             closed_signal_.wait --timeout=sleep_duration
             if is_closed: return null
-            logger_.debug "Attempting to reconnect"
+            logger_.debug "Attempting to (re)connect"
             reconnect_transport.call
 
           send_connect.call
@@ -319,7 +319,7 @@ abstract class DefaultReconnectionStrategyBase implements ReconnectionStrategy:
             result
       finally: | is_exception _ |
         if is_exception:
-          logger_.debug "Reconnection attempt failed"
+          logger_.debug "(Re)connection attempt failed"
 
     unreachable
 
@@ -439,9 +439,9 @@ If the client reconnects, but the broker doesn't have a session for the client,
   hasn't received yet.
   Theoretically, this is a protocol violation, but most brokers just drop the packet.
 
-Note that this can also happen to clients that don't set the clien-session flag, but
+Note that this can also happen to clients that don't set the client-session flag, but
   where the broker lost the session. This can happen because the session expired, the
-  broker crashed, or a client with the same ID connectend in the meantime with a
+  broker crashed, or a client with the same ID connected in the meantime with a
   clean-session flag.
 */
 class TenaciousReconnectionStrategy extends DefaultReconnectionStrategyBase:
