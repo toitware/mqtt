@@ -542,7 +542,6 @@ class Session_:
   pending_count -> int:
     return persistence_store_.size
 
-
 /**
 A persistence strategy for the MQTT client.
 
