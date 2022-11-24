@@ -62,7 +62,7 @@ abstract class Packet:
 
   serialize -> ByteArray:
     buffer := bytes.Buffer
-    buffer.put_byte type << 4 | flags
+    buffer.write_byte type << 4 | flags
 
     header := variable_header
     payload := payload
@@ -76,14 +76,14 @@ abstract class Packet:
 
   static encode_length buffer/bytes.Buffer length/int:
     if length == 0:
-      buffer.put_byte 0
+      buffer.write_byte 0
       return
 
     while length > 0:
       byte := length & 0x7f
       length >>= 7
       if length > 0: byte |= 0x80
-      buffer.put_byte byte
+      buffer.write_byte byte
 
   static encode_string buffer/bytes.Buffer str/string:
     length := ByteArray 2
@@ -419,7 +419,7 @@ class SubscribePacket extends Packet:
     buffer := bytes.Buffer
     topics.do: | topic_qos/TopicQos |
       Packet.encode_string buffer topic_qos.topic
-      buffer.put_byte topic_qos.max_qos
+      buffer.write_byte topic_qos.max_qos
     return buffer.bytes
 
 class SubAckPacket extends Packet:
