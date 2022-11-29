@@ -19,7 +19,7 @@ jobs:
       - name: Setup constants
         shell: bash
         run: |
-          TOIT_VERSION="v2.0.0-alpha.41"
+          TOIT_VERSION="v2.0.0-alpha.35"
 
           export DOWNLOAD_DIR="${{ github.workspace }}/downloads"
           echo "DOWNLOAD_DIR=$DOWNLOAD_DIR" >> $GITHUB_ENV
