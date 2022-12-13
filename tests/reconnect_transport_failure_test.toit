@@ -4,6 +4,7 @@
 
 import expect show *
 import log
+import monitor
 import mqtt
 import mqtt.transport as mqtt
 import mqtt.packets as mqtt
@@ -13,7 +14,6 @@ import .broker_internal
 import .broker_mosquitto
 import .packet_test_client
 import .transport
-import .util
 
 main args:
   test_with_mosquitto := args.contains "--mosquitto"
@@ -79,7 +79,7 @@ test create_transport/Lambda --logger/log.Logger:
     is_destroyed := false
 
     reconnect_attempt := 0
-    reconnect_was_attempted := Latch
+    reconnect_was_attempted := monitor.Latch
     failing_transport.on_reconnect = ::
       reconnect_attempt++
       if reconnect_attempt == 0:
@@ -99,7 +99,7 @@ test create_transport/Lambda --logger/log.Logger:
     // Destroy the transport. From the client's side it looks as if all writes fail from now on.
     is_destroyed = true
 
-    write_failed_latch := Latch
+    write_failed_latch := monitor.Latch
 
     // This packet will make it through after several reconnection attempts.
     client.publish "failing" #[] --qos=0

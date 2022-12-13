@@ -14,7 +14,6 @@ import .broker_internal
 import .broker_mosquitto
 import .transport
 import .packet_test_client
-import .util
 
 /**
 Tests that the persistence store stores unsent packets, and that a new
@@ -24,7 +23,7 @@ test create_transport/Lambda --logger/log.Logger:
   persistence_store := mqtt.MemoryPersistenceStore
   id := "persistence_client_id"
 
-  intercepting_writing := Latch
+  intercepting_writing := monitor.Latch
   write_filter := :: | packet/mqtt.Packet |
     if packet is mqtt.PublishPacket:
       publish := packet as mqtt.PublishPacket

@@ -4,6 +4,7 @@
 
 import expect show *
 import log
+import monitor
 import mqtt
 import mqtt.transport as mqtt
 import mqtt.packets as mqtt
@@ -13,7 +14,6 @@ import .broker_internal
 import .broker_mosquitto
 import .packet_test_client
 import .transport
-import .util
 
 class TestTransport implements mqtt.Transport:
   wrapped_ /mqtt.Transport
@@ -67,7 +67,7 @@ test_no_disconnect_packet create_transport/Lambda --logger/log.Logger:
       --reconnection_strategy = reconnection_strategy
       --logger=logger: | client/mqtt.FullClient wait_for_idle/Lambda clear/Lambda get_activity/Lambda |
 
-    reconnect_was_attempted := Latch
+    reconnect_was_attempted := monitor.Latch
     failing_transport.on_reconnect = ::
       if not reconnect_was_attempted.has_value: reconnect_was_attempted.set true
 
@@ -81,7 +81,7 @@ test_no_disconnect_packet create_transport/Lambda --logger/log.Logger:
     // Destroy the transport. From the client's side it looks as if all writes fail from now on.
     is_destroyed = true
 
-    write_failed_latch := Latch
+    write_failed_latch := monitor.Latch
     task::
       exception := catch:
         // This packet will never make it through, as the transport is failing.
@@ -141,9 +141,9 @@ test_reconnect_before_disconnect_packet create_transport/Lambda --logger/log.Log
       --reconnection_strategy = reconnection_strategy
       --logger=logger: | client/mqtt.FullClient wait_for_idle/Lambda clear/Lambda get_activity/Lambda |
 
-    reconnect_was_attempted := Latch
+    reconnect_was_attempted := monitor.Latch
     is_destroyed := false
-    delay_write_latch := Latch
+    delay_write_latch := monitor.Latch
     write_after_reconnect := 0
 
     brittle_transport.on_reconnect = ::
@@ -162,7 +162,7 @@ test_reconnect_before_disconnect_packet create_transport/Lambda --logger/log.Log
     // Temporarily destroy the transport. From the client's side it looks as if all writes fail from now on.
     is_destroyed = true
 
-    write_succeeded_latch := Latch
+    write_succeeded_latch := monitor.Latch
     task::
       exception := catch:
         // This packet will succeed. First, it fails because the transport is broken, but then
@@ -193,7 +193,7 @@ close_in_handle create_transport/Lambda --logger/log.Logger --force/bool:
   options := mqtt.SessionOptions --client_id="close_in_handle"
   client.connect --options=options
 
-  handle_done := Latch
+  handle_done := monitor.Latch
   task::
     client.handle: | packet |
       if packet is mqtt.PublishPacket:
@@ -221,7 +221,7 @@ test_reconnect_after_broker_disconnect create_transport/Lambda --logger/log.Logg
       --no-clean_session
       --logger=logger: | client/mqtt.FullClient wait_for_idle/Lambda clear/Lambda get_activity/Lambda |
 
-    reconnect_was_attempted := Latch
+    reconnect_was_attempted := monitor.Latch
     is_disconnected := false
 
     disconnecting_transport.on_reconnect = ::
