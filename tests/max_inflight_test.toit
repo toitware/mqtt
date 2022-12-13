@@ -65,7 +65,7 @@ test create_transport/Lambda --logger/log.Logger:
       --logger=logger: | client/mqtt.FullClient wait_for_idle/Lambda clear/Lambda get_activity/Lambda |
 
     should_withhold := false
-    withhold_signal := monitor.Signal
+    withhold_signal := Signal
     test_transport.on_read = ::
       message := it.read
       withhold_signal.wait: not should_withhold

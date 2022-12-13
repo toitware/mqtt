@@ -60,8 +60,8 @@ test create_transport/Lambda --logger/log.Logger:
   delay_lambda_client := null  // Will be set later.
   delay_lambda_should_throw := false
   delay_lambda_should_close := false
-  delay_lambda_semaphore := monitor.Semaphore
-  delay_lambda_called_semaphore := monitor.Semaphore
+  delay_lambda_semaphore := Semaphore
+  delay_lambda_called_semaphore := Semaphore
   reconnection_strategy := mqtt.TenaciousReconnectionStrategy --logger=logger
       --delay_lambda=::
         delay_lambda_called_semaphore.up
