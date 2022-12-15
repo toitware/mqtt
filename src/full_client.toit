@@ -53,7 +53,7 @@ class ActivityChecker_:
       return keep_alive_
 
   run:
-    while not Task.current.is_canceled and not connection_.is_closed:
+    while not task.is_canceled and not connection_.is_closed:
       catch:
         duration := check
         sleep duration
@@ -717,7 +717,7 @@ class FullClient:
   /**
   A signal that is triggered whenever a packet acknowledgement is received.
   */
-  ack_received_signal_ /monitor.Signal := monitor.Signal
+  ack_received_signal_ /Signal := Signal
 
   /**
   Constructs an MQTT client.
@@ -786,7 +786,7 @@ class FullClient:
 
     try:
       handling_latch_.set true
-      while not Task.current.is_canceled:
+      while not task.is_canceled:
         packet /Packet? := null
         catch --unwind=(: not state_ == STATE_DISCONNECTED_ and not state_ == STATE_CLOSING_):
           do_connected_ --allow_disconnected: packet = connection_.read
@@ -1080,7 +1080,7 @@ class FullClient:
   */
   do_connected_ --allow_disconnected/bool=false [block]:
     if is_closed and not (allow_disconnected and state_ == STATE_DISCONNECTED_): throw CLIENT_CLOSED_EXCEPTION
-    while not Task.current.is_canceled:
+    while not task.is_canceled:
       // If the connection is still alive, or if the manager doesn't want us to reconnect, let the
       // exception go through.
       should_abandon := :
