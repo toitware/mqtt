@@ -11,11 +11,11 @@ This implementation was created for testing, but is fully functional.
 import monitor
 import reader
 import log
+import writer show Writer
 import .packets
 import .last_will
 import .topic_qos
 import .topic_tree
-import .util
 
 /**
 The transport interface used by the broker.

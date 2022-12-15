@@ -5,6 +5,7 @@
 import monitor
 import log
 import reader
+import writer show Writer
 
 import .session_options
 import .last_will
@@ -12,7 +13,6 @@ import .packets
 import .tcp  // For toitdoc.
 import .topic_qos
 import .transport
-import .util
 
 CLIENT_CLOSED_EXCEPTION ::= "CLIENT_CLOSED"
 
@@ -696,7 +696,7 @@ class FullClient:
 
   Note that we allow to read the latch multiple times.
   */
-  handling_latch_ /Latch := Latch
+  handling_latch_ /monitor.Latch := monitor.Latch
 
   /**
   A mutex to queue the senders.

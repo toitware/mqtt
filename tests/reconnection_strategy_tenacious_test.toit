@@ -14,7 +14,6 @@ import .broker_internal
 import .broker_mosquitto
 import .packet_test_client
 import .transport
-import .util
 
 class TestTransport implements mqtt.Transport:
   wrapped_ /mqtt.Transport
