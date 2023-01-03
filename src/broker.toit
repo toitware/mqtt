@@ -295,7 +295,7 @@ class Session_:
 
     // Cancel the writer_task_ first, since the reader task might be
     // the one calling the disconnect.
-    assert: writer_task_ != task
+    assert: writer_task_ != Task.current
     if writer_task_:
       writer_task_.cancel
       writer_task_ = null
