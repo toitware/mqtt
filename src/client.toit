@@ -85,7 +85,7 @@ class Client:
       --reconnection_strategy /ReconnectionStrategy? = null
       --catch_all_callback /Lambda? = null:
     reconnection_strategy = reconnection_strategy or
-        TenaciousReconnectionStrategy --delay_lambda=:: Duration --s=it
+        TenaciousReconnectionStrategy --logger=logger_ --delay_lambda=:: Duration --s=it
     client_.connect --options=options --reconnection_strategy=reconnection_strategy
     task --background=background::
       exception := catch --trace:
