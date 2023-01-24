@@ -28,7 +28,7 @@ main:
   transport := mqtt.TcpTransport net.open --host=HOST
 
   client := mqtt.Client --transport=transport
-  client.start --client_id="$CLIENT_ID-no-routes"
+  client.start --client_id="$(CLIENT_ID)-no-routes"
       --on_error=:: print "Client error: $it"
 
   client.subscribe TOPIC:: | topic payload |
