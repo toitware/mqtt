@@ -215,6 +215,7 @@ class Session_:
     if packet is PubAckPacket:
       id := (packet as PubAckPacket).packet_id
       waiting_for_ack_.remove id
+      return
 
     logger_.warn "Unhandled packet $(Packet.debug_string_ packet)"
 
