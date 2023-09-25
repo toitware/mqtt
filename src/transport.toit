@@ -110,7 +110,7 @@ class ActivityMonitoringTransport implements Transport:
     wrapped_transport_.reconnect
 
   disconnect -> none:
-    wrapped-transport_.disconnect
+    wrapped_transport_.disconnect
 
   is_closed -> bool:
     return wrapped_transport_.is_closed
