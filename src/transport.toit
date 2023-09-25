@@ -45,6 +45,16 @@ interface Transport implements reader.Reader:
   reconnect -> none
 
   /**
+  Disconnects the transport.
+
+  This can be called before doing a $reconnect. It will close the network, if
+    that's supported.
+  Disconnecting is not the same as closing. A transport can be disconnected
+    and still be open.
+  */
+  disconnect -> none
+
+  /**
   Whether the transport is closed.
   If it $supports_reconnect then calling $reconnect reopens the transport.
   */
@@ -98,6 +108,9 @@ class ActivityMonitoringTransport implements Transport:
 
   reconnect -> none:
     wrapped_transport_.reconnect
+
+  disconnect -> none:
+    wrapped-transport_.disconnect
 
   is_closed -> bool:
     return wrapped_transport_.is_closed

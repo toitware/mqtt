@@ -25,14 +25,28 @@ class TcpTransport implements Transport BrokerTransport:
   constructor socket/tcp.Socket:
     socket_ = socket
 
+  /** Deprecated. Use $(constructor --net-open --host) instead. */
   constructor network/net.Interface --host/string --port/int=1883:
-    return ReconnectingTransport_ network --host=host --port=port
+    return ReconnectingTransport_ network --net-open=null --host=host --port=port
 
+  constructor --net-open/Lambda --host/string --port/int=1883:
+    return ReconnectingTransport_ null --net-open=net-open --host=host --port=port
+
+  /** Deprecated. Use $(TcpTransport.tls --net-open --host) instead. */
   constructor.tls network/net.Interface --host/string --port/int=8883
       --root_certificates/List=[]
       --server_name/string?=null
       --certificate/tls.Certificate?=null:
-    return ReconnectingTlsTransport_ network --host=host --port=port
+    return ReconnectingTlsTransport_ network --net-open=null --host=host --port=port
+      --root_certificates=root_certificates
+      --server_name=server_name
+      --certificate=certificate
+
+  constructor.tls --net-open/Lambda --host/string --port/int=8883
+      --root_certificates/List=[]
+      --server_name/string?=null
+      --certificate/tls.Certificate?=null:
+    return ReconnectingTlsTransport_ null --net-open=net-open --host=host --port=port
       --root_certificates=root_certificates
       --server_name=server_name
       --certificate=certificate
@@ -58,17 +72,24 @@ class TcpTransport implements Transport BrokerTransport:
   reconnect -> none:
     throw "UNSUPPORTED"
 
+  disconnect -> none:
+    throw "UNSUPPORTED"
+
 class ReconnectingTransport_ extends TcpTransport:
   // Reconnection information.
-  network_ /net.Interface
+  network_ /net.Interface? := null
   host_    /string
   port_    /int
+  open_    /Lambda?
 
   reconnecting_mutex_ /monitor.Mutex := monitor.Mutex
 
-  constructor .network_ --host/string --port/int=1883:
+  constructor .network_ --net-open/Lambda? --host/string --port/int=1883:
+    if not network_ and not net-open: throw "Either network or net-open must be provided"
+    if network_ and net-open: throw "Only one of network or net-open must be provided"
     host_ = host
     port_ = port
+    open_ = net-open
     super.from_subclass_ null
     reconnect
 
@@ -78,7 +99,15 @@ class ReconnectingTransport_ extends TcpTransport:
   read -> ByteArray?:
     return socket_.read
 
+  close -> none:
+    super
+    // Only close the network if we were the ones who opened it.
+    if open_ and network_:
+      network_.close
+      network_ = null
+
   reconnect:
+    if not network_: network_ = open_.call
     old_socket := socket_
     reconnecting_mutex_.do:
       if not identical old_socket socket_: return
@@ -105,19 +134,23 @@ class ReconnectingTransport_ extends TcpTransport:
   supports_reconnect -> bool:
     return true
 
+  disconnect:
+    if not open_: return
+    if network_: network_.close
+
 class ReconnectingTlsTransport_ extends ReconnectingTransport_:
   certificate_ /tls.Certificate?
   server_name_ /string?
   root_certificates_ /List
 
-  constructor network/net.Interface --host/string --port/int
+  constructor network/net.Interface? --net-open/Lambda? --host/string --port/int
       --root_certificates/List=[]
       --server_name/string?=null
       --certificate/tls.Certificate?=null:
     root_certificates_ = root_certificates
     server_name_ = server_name
     certificate_ = certificate
-    super network --host=host --port=port
+    super network --net-open=net-open --host=host --port=port
 
   new_connection_ -> tcp.Socket:
     socket := network_.tcp_connect host_ port_

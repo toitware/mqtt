@@ -3,6 +3,8 @@
 // found in the LICENSE file.
 
 import log
+import net
+import tls
 import .full_client
 import .session_options
 import .last_will
@@ -22,7 +24,7 @@ class Client:
   Constructs a new routing MQTT client.
 
   The $transport parameter is used to send messages and is usually a TCP socket instance.
-    See $TcpTransport.
+    See $(constructor --host), $Client.tls, and $TcpTransport.
 
   The $routes must be a map from topic (of type $string) to callback. After the client started, it
     will automatically subscribe to all topics in the map (with a max-qos of 1). If the broker already
@@ -39,6 +41,36 @@ class Client:
     routes.do: | topic/string callback/Lambda |
       max_qos := 1
       subscription_callbacks_.set topic (CallbackEntry_ callback max_qos)
+
+  /**
+  Variant of $(constructor --transport) that connects to the given $host:$port over TCP.
+  */
+  constructor
+      --host/string
+      --port/int=1883
+      --net-open /Lambda? = (:: net.open)
+      --logger /log.Logger = log.default
+      --routes / Map = {:}:
+    transport := TcpTransport --host=host --port=port --net-open=net-open
+    return Client --transport=transport --logger=logger --routes=routes
+
+  /**
+  Variant of $(constructor --host) that supports TLS.
+  */
+  constructor.tls
+      --host/string
+      --port/int=8883
+      --net-open/Lambda? = (:: net.open)
+      --root_certificates/List=[]
+      --server_name/string?=null
+      --certificate/tls.Certificate?=null
+      --logger /log.Logger = log.default
+      --routes / Map = {:}:
+    transport := TcpTransport.tls --host=host --port=port --net-open=net-open
+          --root-certificates=root-certificates
+          --server-name=server-name
+          --certificate=certificate
+    return Client --transport=transport --logger=logger --routes=routes
 
   /**
   Variant of $(start --options).

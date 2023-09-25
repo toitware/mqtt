@@ -36,6 +36,8 @@ class TestClientTransport implements mqtt.Transport:
   reconnect -> none:
     pipe_ = server_.connect
 
+  disconnect -> none:
+
   is_closed -> bool:
     return pipe_.client_is_closed
 
@@ -261,6 +263,10 @@ class TestTransport implements mqtt.Transport:
     remaining_to_write_ = 0
     start_reading_
 
+  disconnect -> none:
+    activity_.add [ "disconnect", Time.monotonic_us ]
+    wrapped_.disconnect
+
   is_closed -> bool:
     return wrapped_.is_closed
 
@@ -269,3 +275,35 @@ class TestTransport implements mqtt.Transport:
 
   activity -> List:
     return activity_
+
+class CallbackTestTransport implements mqtt.Transport:
+  wrapped_ /mqtt.Transport
+
+  on_reconnect /Lambda? := null
+  on_disconnect /Lambda? := null
+  on_write /Lambda? := null
+  on_read /Lambda? := null
+
+  constructor .wrapped_:
+
+  write bytes/ByteArray -> int:
+    if on_write: on_write.call bytes
+    return wrapped_.write bytes
+
+  read -> ByteArray?:
+    if on_read: return on_read.call wrapped_
+    return wrapped_.read
+
+  close -> none: wrapped_.close
+
+  supports_reconnect -> bool: return wrapped_.supports_reconnect
+
+  reconnect -> none:
+    if on_reconnect: on_reconnect.call
+    wrapped_.reconnect
+
+  disconnect -> none:
+    if on_disconnect: on_disconnect.call
+    wrapped_.disconnect
+
+  is_closed -> bool: return wrapped_.is_closed

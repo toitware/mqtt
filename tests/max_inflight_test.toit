@@ -19,6 +19,7 @@ class TestTransport implements mqtt.Transport:
   wrapped_ /mqtt.Transport
 
   on_reconnect /Lambda? := null
+  on_disconnect /Lambda? := null
   on_write /Lambda? := null
   on_read /Lambda? := null
 
@@ -39,6 +40,10 @@ class TestTransport implements mqtt.Transport:
   reconnect -> none:
     if on_reconnect: on_reconnect.call
     wrapped_.reconnect
+
+  disconnect -> none:
+    if on_disconnect: on_disconnect.call
+    wrapped_.disconnect
 
   is_closed -> bool: return wrapped_.is_closed
 

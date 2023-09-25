@@ -198,6 +198,11 @@ interface ReconnectionStrategy:
   The strategy should first call $send_connect, followed by a $receive_connect_ack. If
     the connection is unsuccessful, it may retry.
 
+  The $disconnect_transport may be called before attempting a reconnect. It shuts down the
+    network, thus increasing the chance of a successful reconnect. However, a complete
+    network reconnect takes more time. We recommend to try at least once to reconnect without
+    a disconnect first, and then call $disconnect_transport for later attempts.
+
   The $receive_connect_ack block returns whether the broker had a session for this client.
 
   The $is_initial_connection is true if this is the first time the client connects to the broker.
@@ -206,6 +211,7 @@ interface ReconnectionStrategy:
       transport/ActivityMonitoringTransport
       --is_initial_connection /bool
       [--reconnect_transport]
+      [--disconnect_transport]
       [--send_connect]
       [--receive_connect_ack]
       [--disconnect]
@@ -280,6 +286,7 @@ abstract class DefaultReconnectionStrategyBase implements ReconnectionStrategy:
   do_connect transport/ActivityMonitoringTransport
       --reuse_connection/bool=false
       [--reconnect_transport]
+      [--disconnect_transport]
       [--send_connect]
       [--receive_connect_ack]:
     attempt_counter := -1
@@ -306,6 +313,7 @@ abstract class DefaultReconnectionStrategyBase implements ReconnectionStrategy:
               sleep_duration = attempt_delays_[attempt_counter - 1]
             else:
               sleep_duration = delay_lambda_.call attempt_counter
+            disconnect_transport.call
             closed_signal_.wait --timeout=sleep_duration
             if is_closed: return null
             logger_.debug "Attempting to (re)connect"
@@ -327,6 +335,7 @@ abstract class DefaultReconnectionStrategyBase implements ReconnectionStrategy:
       transport/ActivityMonitoringTransport
       --is_initial_connection /bool
       [--reconnect_transport]
+      [--disconnect_transport]
       [--send_connect]
       [--receive_connect_ack]
       [--disconnect]
@@ -364,6 +373,7 @@ class DefaultCleanSessionReconnectionStrategy extends DefaultReconnectionStrateg
       transport/ActivityMonitoringTransport
       --is_initial_connection /bool
       [--reconnect_transport]
+      [--disconnect_transport]
       [--send_connect]
       [--receive_connect_ack]
       [--disconnect]:
@@ -372,6 +382,7 @@ class DefaultCleanSessionReconnectionStrategy extends DefaultReconnectionStrateg
     session_exists := do_connect transport
         --reuse_connection = is_initial_connection
         --reconnect_transport = reconnect_transport
+        --disconnect_transport = disconnect_transport
         --send_connect = send_connect
         --receive_connect_ack = receive_connect_ack
     if session_exists:
@@ -402,12 +413,14 @@ class DefaultSessionReconnectionStrategy extends DefaultReconnectionStrategyBase
       transport/ActivityMonitoringTransport
       --is_initial_connection /bool
       [--reconnect_transport]
+      [--disconnect_transport]
       [--send_connect]
       [--receive_connect_ack]
       [--disconnect]:
     session_exists := do_connect transport
         --reuse_connection = is_initial_connection
         --reconnect_transport = reconnect_transport
+        --disconnect_transport = disconnect_transport
         --send_connect = send_connect
         --receive_connect_ack = receive_connect_ack
 
@@ -468,12 +481,14 @@ class TenaciousReconnectionStrategy extends DefaultReconnectionStrategyBase:
       transport/ActivityMonitoringTransport
       --is_initial_connection /bool
       [--reconnect_transport]
+      [--disconnect_transport]
       [--send_connect]
       [--receive_connect_ack]
       [--disconnect]:
     session_exists := do_connect transport
         --reuse_connection = is_initial_connection
         --reconnect_transport = reconnect_transport
+        --disconnect-transport = disconnect_transport
         --send_connect = send_connect
         --receive_connect_ack = receive_connect_ack
 
@@ -1136,6 +1151,8 @@ class FullClient:
             --reconnect_transport = :
               transport_.reconnect
               connection_ = Connection_ transport_ --keep_alive=session_.options.keep_alive
+            --disconnect-transport = :
+              transport_.disconnect
             --send_connect = :
               packet := ConnectPacket session_.options.client_id
                   --clean_session=session_.options.clean_session
@@ -1186,4 +1203,3 @@ class FullClient:
       if reconnection_strategy_: reconnection_strategy_.close
       connection_.close
       if not handling_latch_.has_value: handling_latch_.set false
-
