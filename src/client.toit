@@ -67,8 +67,8 @@ class Client:
       --logger /log.Logger = log.default
       --routes / Map = {:}:
     transport := TcpTransport.tls --host=host --port=port --net_open=net_open
-          --root-certificates=root-certificates
-          --server-name=server-name
+          --root_certificates=root_certificates
+          --server_name=server_name
           --certificate=certificate
     return Client --transport=transport --logger=logger --routes=routes
 

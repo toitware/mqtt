@@ -488,7 +488,7 @@ class TenaciousReconnectionStrategy extends DefaultReconnectionStrategyBase:
     session_exists := do_connect transport
         --reuse_connection = is_initial_connection
         --reconnect_transport = reconnect_transport
-        --disconnect-transport = disconnect_transport
+        --disconnect_transport = disconnect_transport
         --send_connect = send_connect
         --receive_connect_ack = receive_connect_ack
 
@@ -1151,7 +1151,7 @@ class FullClient:
             --reconnect_transport = :
               transport_.reconnect
               connection_ = Connection_ transport_ --keep_alive=session_.options.keep_alive
-            --disconnect-transport = :
+            --disconnect_transport = :
               transport_.disconnect
             --send_connect = :
               packet := ConnectPacket session_.options.client_id
