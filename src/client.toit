@@ -48,10 +48,10 @@ class Client:
   constructor
       --host/string
       --port/int=1883
-      --net-open /Lambda? = (:: net.open)
+      --net_open /Lambda? = (:: net.open)
       --logger /log.Logger = log.default
       --routes / Map = {:}:
-    transport := TcpTransport --host=host --port=port --net-open=net-open
+    transport := TcpTransport --host=host --port=port --net_open=net_open
     return Client --transport=transport --logger=logger --routes=routes
 
   /**
@@ -60,13 +60,13 @@ class Client:
   constructor.tls
       --host/string
       --port/int=8883
-      --net-open/Lambda? = (:: net.open)
+      --net_open/Lambda? = (:: net.open)
       --root_certificates/List=[]
       --server_name/string?=null
       --certificate/tls.Certificate?=null
       --logger /log.Logger = log.default
       --routes / Map = {:}:
-    transport := TcpTransport.tls --host=host --port=port --net-open=net-open
+    transport := TcpTransport.tls --host=host --port=port --net_open=net_open
           --root-certificates=root-certificates
           --server-name=server-name
           --certificate=certificate
