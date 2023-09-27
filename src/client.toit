@@ -46,11 +46,11 @@ class Client:
   Variant of $(constructor --transport) that connects to the given $host:$port over TCP.
   */
   constructor
-      --host/string
-      --port/int=1883
+      --host /string
+      --port /int = 1883
       --net_open /Lambda? = (:: net.open)
       --logger /log.Logger = log.default
-      --routes / Map = {:}:
+      --routes /Map = {:}:
     transport := TcpTransport --host=host --port=port --net_open=net_open
     return Client --transport=transport --logger=logger --routes=routes
 
@@ -58,14 +58,14 @@ class Client:
   Variant of $(constructor --host) that supports TLS.
   */
   constructor.tls
-      --host/string
-      --port/int=8883
-      --net_open/Lambda? = (:: net.open)
-      --root_certificates/List=[]
-      --server_name/string?=null
-      --certificate/tls.Certificate?=null
+      --host /string
+      --port /int = 8883
+      --net_open /Lambda? = (:: net.open)
+      --root_certificates /List = []
+      --server_name /string? = null
+      --certificate /tls.Certificate? = null
       --logger /log.Logger = log.default
-      --routes / Map = {:}:
+      --routes /Map = {:}:
     transport := TcpTransport.tls --host=host --port=port --net_open=net_open
           --root_certificates=root_certificates
           --server_name=server_name
