@@ -5,7 +5,6 @@
 import monitor
 import mqtt
 import mqtt.packets as mqtt
-import net
 
 /**
 An example demonstrating the full client.
@@ -21,7 +20,7 @@ TOPIC_PREFIX ::= "toit/topic-$(random)"
 CLIENT_ID ::= "toit-client-id-$(random)"
 
 main:
-  transport := mqtt.TcpTransport net.open --host=HOST --port=PORT
+  transport := mqtt.TcpTransport --host=HOST --port=PORT
   client := mqtt.FullClient --transport=transport
 
   options := mqtt.SessionOptions --client_id=CLIENT_ID

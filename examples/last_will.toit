@@ -5,15 +5,12 @@
 import mqtt
 import mqtt.transport
 import mqtt.packets
-import net
 
 LAST_WILL_TOPIC ::= "toit/last-will-$(random)"
 HOST ::= "test.mosquitto.org"
-PORT ::= 1883
 
 start_will_listener:
-  transport := mqtt.TcpTransport net.open --host=HOST --port=PORT
-  client := mqtt.Client --transport=transport
+  client := mqtt.Client --host=HOST
   client.start
   client.subscribe LAST_WILL_TOPIC:: | topic msg |
     print "Received $msg.to_string"
@@ -27,9 +24,7 @@ main:
     "Bye!".to_byte_array
     --qos=1
 
-  transport := mqtt.TcpTransport net.open --host=HOST --port=PORT
-
-  client := mqtt.Client --transport=transport
+  client := mqtt.Client --host=HOST
 
   options := mqtt.SessionOptions
       --client_id=""  // A fresh ID chosen by the broker.

@@ -3,7 +3,6 @@
 // be found in the EXAMPLES_LICENSE file.
 
 import mqtt
-import net
 import tls
 import net.x509
 
@@ -13,10 +12,8 @@ PORT ::= 8883
 CLIENT_ID ::= "toit-client-id"
 
 main:
-  transport := mqtt.TcpTransport.tls net.open --host=HOST --port=PORT
-    --root_certificates=[SERVER_CERTIFICATE]
-
-  client := mqtt.Client --transport=transport
+  client := mqtt.Client.tls --host=HOST
+      --root_certificates=[SERVER_CERTIFICATE]
 
   client.start --client_id=CLIENT_ID
   print "Connected to broker"

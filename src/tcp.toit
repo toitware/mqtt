@@ -29,7 +29,7 @@ class TcpTransport implements Transport BrokerTransport:
   constructor network/net.Interface --host/string --port/int=1883:
     return ReconnectingTransport_ network --net_open=null --host=host --port=port
 
-  constructor --net_open/Lambda --host/string --port/int=1883:
+  constructor --host/string --port/int=1883 --net_open/Lambda=(:: net.open):
     return ReconnectingTransport_ null --net_open=net_open --host=host --port=port
 
   /** Deprecated. Use $(TcpTransport.tls --net_open --host) instead. */
@@ -42,7 +42,7 @@ class TcpTransport implements Transport BrokerTransport:
       --server_name=server_name
       --certificate=certificate
 
-  constructor.tls --net_open/Lambda --host/string --port/int=8883
+  constructor.tls --host/string --port/int=8883 --net_open/Lambda=(:: net.open)
       --root_certificates/List=[]
       --server_name/string?=null
       --certificate/tls.Certificate?=null:
