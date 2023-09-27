@@ -49,16 +49,15 @@ CLIENT_ID ::= "<- insert client ID here ->"
 // "foo/" are allowed.
 MY_TOPIC ::= "<- insert topic here ->"
 
-create_transport network/net.Interface -> mqtt.Transport:
+create_transport -> mqtt.Transport:
   client_certificate := tls.Certificate (x509.Certificate.parse CLIENT_CERTIFICATE) CLIENT_KEY
-  return mqtt.TcpTransport.tls network --host=HOST --port=PORT
+  return mqtt.TcpTransport.tls --host=HOST --port=PORT
       --server_name=HOST
       --root_certificates=[certificate_roots.AMAZON_ROOT_CA_1]
       --certificate=client_certificate
 
 main:
-  network := net.open
-  transport := create_transport network
+  transport := create_transport
 
   client := mqtt.Client --transport=transport
 

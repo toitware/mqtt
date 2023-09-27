@@ -23,9 +23,7 @@ CLIENT_ID ::= "toit-publish"
 TOPIC ::= "toit/example/publish_subscribe"
 
 main:
-  transport := mqtt.TcpTransport net.open --host=HOST
-
-  client := mqtt.Client --transport=transport
+  client := mqtt.Client --host=HOST
   client.start --client_id=CLIENT_ID
       --on_error=:: print "Client error: $it"
 

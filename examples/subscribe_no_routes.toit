@@ -3,7 +3,6 @@
 // be found in the EXAMPLES_LICENSE file.
 
 import mqtt
-import net
 
 /**
 An example demonstrating how to subscribe to messages.
@@ -25,9 +24,7 @@ CLIENT_ID ::= "toit-subscribe-$(random)"
 TOPIC ::= "toit/example/#"
 
 main:
-  transport := mqtt.TcpTransport net.open --host=HOST
-
-  client := mqtt.Client --transport=transport
+  client := mqtt.Client --host=HOST
   client.start --client_id="$(CLIENT_ID)-no-routes"
       --on_error=:: print "Client error: $it"
 

@@ -34,10 +34,8 @@ PASSWORD ::= "readwrite"
 TOPIC_PREFIX ::= "toit/pubsub-$(random)"
 
 main:
-  transport := mqtt.TcpTransport.tls net.open --host=HOST
-    --root_certificates=[SERVER_CERTIFICATE]
-
-  client := mqtt.Client --transport=transport
+  client := mqtt.Client.tls --host=HOST
+      --root_certificates=[SERVER_CERTIFICATE]
 
   options := mqtt.SessionOptions
       --clean_session
