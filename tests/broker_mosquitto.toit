@@ -90,7 +90,7 @@ with_mosquitto --logger/log.Logger [block]:
     sleep --ms=(50*i)
 
   try:
-    block.call:: mqtt.TcpTransport network --host="localhost" --port=port
+    block.call:: mqtt.TcpTransport --net_open=(:: net.open) --host="localhost" --port=port
   finally: | is_exception _ |
     pid := mosquitto_fork_data[3]
     logger.info "killing mosquitto server"
@@ -106,4 +106,4 @@ Can sometimes be useful, as the logging is better.
 */
 with_external_mosquitto --logger/log.Logger [block]:
   network := net.open
-  block.call:: mqtt.TcpTransport network --host="localhost" --port=1883
+  block.call:: mqtt.TcpTransport --net_open=(:: net.open) --host="localhost" --port=1883

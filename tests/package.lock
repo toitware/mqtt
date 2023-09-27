@@ -7,5 +7,6 @@ packages:
     path: ..
   pkg-host:
     url: github.com/toitlang/pkg-host
+    name: host
     version: 1.6.0
     hash: d05b91390e76c3543a9968b042aed330210bafa4

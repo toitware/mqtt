@@ -15,40 +15,15 @@ import .broker_mosquitto
 import .packet_test_client
 import .transport
 
-class TestTransport implements mqtt.Transport:
-  wrapped_ /mqtt.Transport
-
-  on_reconnect /Lambda? := null
-  on_write /Lambda? := null
-  on_read /Lambda? := null
-
-  constructor .wrapped_:
-
-  write bytes/ByteArray -> int:
-    if on_write: on_write.call bytes
-    return wrapped_.write bytes
-
-  read -> ByteArray?:
-    if on_read: return on_read.call wrapped_
-    return wrapped_.read
-
-  close -> none: wrapped_.close
-  supports_reconnect -> bool: return wrapped_.supports_reconnect
-  reconnect -> none:
-    if on_reconnect: on_reconnect.call
-    wrapped_.reconnect
-
-  is_closed -> bool: return wrapped_.is_closed
-
 /**
 Tests that the client closes as if it was a forced close if the connection is down.
 */
 test_no_disconnect_packet create_transport/Lambda --logger/log.Logger:
-  failing_transport /TestTransport? := null
+  failing_transport /CallbackTestTransport? := null
 
   create_failing_transport := ::
     transport := create_transport.call
-    failing_transport = TestTransport transport
+    failing_transport = CallbackTestTransport transport
     failing_transport
 
   // There will be a reconnection attempt immediately when the connection fails.
@@ -125,11 +100,11 @@ This is different from $test_no_disconnect_packet, as the client already managed
   sends a disconnect instead of abruptly closing the connection.
 */
 test_reconnect_before_disconnect_packet create_transport/Lambda --logger/log.Logger:
-  brittle_transport /TestTransport? := null
+  brittle_transport /CallbackTestTransport? := null
 
   create_brittle_transport := ::
     transport := create_transport.call
-    brittle_transport = TestTransport transport
+    brittle_transport = CallbackTestTransport transport
     brittle_transport
 
   reconnection_strategy := mqtt.DefaultSessionReconnectionStrategy
@@ -209,11 +184,11 @@ close_in_handle create_transport/Lambda --logger/log.Logger --force/bool:
   handle_done.get
 
 test_reconnect_after_broker_disconnect create_transport/Lambda --logger/log.Logger:
-  disconnecting_transport /TestTransport? := null
+  disconnecting_transport /CallbackTestTransport? := null
 
   create_failing_transport := ::
     transport := create_transport.call
-    disconnecting_transport = TestTransport transport
+    disconnecting_transport = CallbackTestTransport transport
     disconnecting_transport
 
   with_packet_client create_failing_transport

@@ -66,6 +66,7 @@ class SlowTransport implements mqtt.Transport:
   close -> none: wrapped_.close
   supports_reconnect -> bool: return wrapped_.supports_reconnect
   reconnect -> none: wrapped_.reconnect
+  disconnect -> none: wrapped_.disconnect
   is_closed -> bool: return wrapped_.is_closed
 
 /**

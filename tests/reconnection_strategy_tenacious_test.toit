@@ -15,33 +15,6 @@ import .broker_mosquitto
 import .packet_test_client
 import .transport
 
-class TestTransport implements mqtt.Transport:
-  wrapped_ /mqtt.Transport
-
-  on_reconnect /Lambda? := null
-  on_write /Lambda? := null
-  on_read /Lambda? := null
-
-  constructor .wrapped_:
-
-  write bytes/ByteArray -> int:
-    if on_write: on_write.call bytes
-    return wrapped_.write bytes
-
-  read -> ByteArray?:
-    if on_read: return on_read.call wrapped_
-    return wrapped_.read
-
-  close -> none: wrapped_.close
-
-  supports_reconnect -> bool: return wrapped_.supports_reconnect
-
-  reconnect -> none:
-    if on_reconnect: on_reconnect.call
-    wrapped_.reconnect
-
-  is_closed -> bool: return wrapped_.is_closed
-
 /**
 Tests the tenacious reconnection strategy.
 
@@ -49,11 +22,11 @@ The reconnection strategy keeps on trying.
 The only way to stop it is to close the client.
 */
 test create_transport/Lambda --logger/log.Logger:
-  failing_transport /TestTransport? := null
+  failing_transport /CallbackTestTransport? := null
 
   create_failing_transport := ::
     transport := create_transport.call
-    failing_transport = TestTransport transport
+    failing_transport = CallbackTestTransport transport
     failing_transport
 
   delay_lambda_client := null  // Will be set later.
@@ -100,9 +73,15 @@ test create_transport/Lambda --logger/log.Logger:
       // eventually the packet will be sent.
       client.publish "eventually_succeeding" #[] --qos=0
 
-    // Allow for 10 reconnection attempts.
+    was_disconnected := false
+    failing_transport.on_disconnect = ::
+      was_disconnected = true
+
+      // Allow for 10 reconnection attempts.
     10.repeat: delay_lambda_semaphore.up
     10.repeat: delay_lambda_called_semaphore.down
+
+    expect was_disconnected
 
     // Switch back to just having the write fail.
     is_reconnect_failing = false

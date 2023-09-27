@@ -25,41 +25,15 @@ main args:
   run_test := : | create_transport/Lambda | test create_transport --logger=logger
   with_internal_broker --logger=logger run_test
 
-
-class TestTransport implements mqtt.Transport:
-  wrapped_ /mqtt.Transport
-
-  on_reconnect /Lambda? := null
-  on_write /Lambda? := null
-  on_read /Lambda? := null
-
-  constructor .wrapped_:
-
-  write bytes/ByteArray -> int:
-    if on_write: on_write.call bytes
-    return wrapped_.write bytes
-
-  read -> ByteArray?:
-    if on_read: return on_read.call wrapped_
-    return wrapped_.read
-
-  close -> none: wrapped_.close
-  supports_reconnect -> bool: return wrapped_.supports_reconnect
-  reconnect -> none:
-    if on_reconnect: on_reconnect.call
-    wrapped_.reconnect
-
-  is_closed -> bool: return wrapped_.is_closed
-
 /**
 Tests that the client continues to reconnect if the transport reconnect fails.
 */
 test create_transport/Lambda --logger/log.Logger:
-  failing_transport /TestTransport? := null
+  failing_transport /CallbackTestTransport? := null
 
   create_failing_transport := ::
     transport := create_transport.call
-    failing_transport = TestTransport transport
+    failing_transport = CallbackTestTransport transport
     failing_transport
 
   reconnection_strategy := mqtt.DefaultSessionReconnectionStrategy
