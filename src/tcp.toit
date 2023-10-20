@@ -136,7 +136,10 @@ class ReconnectingTransport_ extends TcpTransport:
 
   disconnect:
     if not open_: return
-    if network_: network_.close
+    if network_:
+      network := network_
+      network_ = null
+      network.close
 
 class ReconnectingTlsTransport_ extends ReconnectingTransport_:
   certificate_ /tls.Certificate?
