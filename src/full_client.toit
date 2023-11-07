@@ -977,19 +977,27 @@ class FullClient:
     if topic == "" or topic.contains "+" or topic.contains "#": throw "INVALID_ARGUMENT"
     if qos == 1:
       ack_received_signal_.wait: session_.pending_count < session_.options.max_inflight
-    packet_id := send_publish_ topic payload --qos=qos --retain=retain
+    packet_id/int? := null
     if qos == 1:
+      packet_id = session_.next_packet_id
+      // We need to mark the packet as pending before sending it, as we might
+      // receive an ack as soon as we sent it. We might not have the time
+      // to notify the session of the pending packet.
       session_.set_pending_ack topic payload --packet_id=packet_id --retain=retain
+    try:
+      send_publish_ topic payload --packet_id=packet_id --qos=qos --retain=retain
+    finally: | is-exception _ |
+      if is-exception:
+        // Drop the packet from the persistence store again.
+        if qos == 1: session_.remove_pending packet_id
 
   /**
   Sends a $PublishPacket with the given $topic, $payload, $qos and $retain.
 
   If $qos is 1, then allocates a packet id and returns it.
   */
-  send_publish_ topic/string payload/ByteArray --qos/int --retain/bool -> int?:
+  send_publish_ topic/string payload/ByteArray --packet_id --qos/int --retain/bool -> none:
     if qos != 0 and qos != 1: throw "INVALID_ARGUMENT"
-
-    packet_id := qos > 0 ? session_.next_packet_id : null
 
     packet := PublishPacket
         topic
@@ -999,7 +1007,6 @@ class FullClient:
         --packet_id=packet_id
 
     send_ packet
-    return packet_id
 
   /**
   Subscribes to the given $topic with a max qos of $max_qos.
