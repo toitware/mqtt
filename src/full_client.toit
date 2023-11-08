@@ -529,7 +529,7 @@ class Session_:
   /**
   Keeps track of ids that haven't been given to the persistence store yet
     but are in the process of being sent to the broker.
-  Once the sending is done without an exception the id is removed from this
+  Once the sending is done without an exception, the id is removed from this
     set and given to the persistence store.
   Depending on whether it was $ACKED_ or $NOT_ACKED_, the packet is then
     immediately removed from the store again.
