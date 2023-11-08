@@ -33,7 +33,7 @@ class TestPersistenceStore extends mqtt.MemoryPersistenceStore:
   removed := {}
 
   add packet/mqtt.PersistedPacket -> none:
-    added.add packet.packet-id
+    added.add packet.packet_id
     super packet
 
   remove_persisted_with_id packet_id/int -> bool:
@@ -73,7 +73,7 @@ test create_transport/Lambda --logger/log.Logger:
     YIELD_COUNT.repeat: yield
     expect persistence_store.is_empty
     // The ack should have made it to the persistence store.
-    expect persistence_store.is-empty
+    expect persistence_store.is_empty
     expect_equals 1 persistence_store.added.size
 
     delay_is_active = true
@@ -90,7 +90,7 @@ test create_transport/Lambda --logger/log.Logger:
     expect_not publish_is_done
     // At this point the persistence store hasn't received the packet
     // nor the ack yet as the send routine is still running.
-    expect persistence_store.is-empty
+    expect persistence_store.is_empty
     expect_equals 1 persistence_store.added.size
 
     return_from_write.send true
@@ -98,7 +98,7 @@ test create_transport/Lambda --logger/log.Logger:
     // The publish is now done.
     expect publish_is_done
     // The ack should have made it to the persistence store.
-    expect persistence_store.is-empty
+    expect persistence_store.is_empty
     expect_equals 2 persistence_store.added.size
     expect_equals 2 persistence_store.removed.size
 
