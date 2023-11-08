@@ -282,17 +282,23 @@ class CallbackTestTransport implements mqtt.Transport:
   on_reconnect /Lambda? := null
   on_disconnect /Lambda? := null
   on_write /Lambda? := null
+  on_after_write /Lambda? := null
   on_read /Lambda? := null
+  on_after_read /Lambda? := null
 
   constructor .wrapped_:
 
   write bytes/ByteArray -> int:
     if on_write: on_write.call bytes
-    return wrapped_.write bytes
+    result := wrapped_.write bytes
+    if on_after_write: on_after_write.call bytes result
+    return result
 
   read -> ByteArray?:
     if on_read: return on_read.call wrapped_
-    return wrapped_.read
+    result := wrapped_.read
+    if on_after_read: on_after_read.call result
+    return result
 
   close -> none: wrapped_.close
 
