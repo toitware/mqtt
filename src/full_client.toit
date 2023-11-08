@@ -523,13 +523,52 @@ class Session_:
 
   options /SessionOptions
 
+  static NOT_ACKED_ ::= 0
+  static ACKED_ ::= 1
+
+  /**
+  Keeps track of ids that haven't been given to the persistence store yet
+    but are in the process of being sent to the broker.
+  Once the sending is done without an exception the id is removed from this
+    set and given to the persistence store.
+  Depending on whether it was $ACKED_ or $NOT_ACKED_, the packet is then
+    immediately removed from the store again.
+  */
+  ack_ids_to_hold_/Map ::= {:}
+
   constructor .options .persistence_store_:
+
+  /**
+  Marks the given packet $id as being in the process of being sent to the broker.
+
+  The session holds the acks and doesn't immediately give it to the
+    persistence store.
+  */
+  hold_ack_for id/int -> none:
+    ack_ids_to_hold_[id] = NOT_ACKED_
+
+  /**
+  Restores normal ack handling for the given packet $id.
+  */
+  restore_ack_handling_for id/int -> none:
+    ack_ids_to_hold_.remove id
 
   set_pending_ack topic/string payload/ByteArray --packet_id/int --retain/bool:
     persistent := PersistedPacket topic payload --retain=retain --packet_id=packet_id
     persistence_store_.add persistent
+    ack_ids_to_hold_.get packet_id --if_present=: | current_value |
+      if current_value == ACKED_:
+        // This packet was already acked.
+        // Inform the persistence store.
+        remove_pending packet_id
+      // Either way, stop treating acks for this id specially.
+      restore_ack_handling_for packet_id
 
   handle_ack id/int [--if_absent] -> none:
+    if ack_ids_to_hold_.contains id:
+      ack_ids_to_hold_[id] = ACKED_
+      return
+
     if not persistence_store_.remove_persisted_with_id id:
       if_absent.call id
 
@@ -975,21 +1014,22 @@ class FullClient:
   */
   publish topic/string payload/ByteArray --qos/int=1 --retain/bool=false -> none:
     if topic == "" or topic.contains "+" or topic.contains "#": throw "INVALID_ARGUMENT"
-    if qos == 1:
+    if qos == 0:
+      send_publish_ topic payload --packet_id=null --qos=qos --retain=retain
+    else if  qos == 1:
       ack_received_signal_.wait: session_.pending_count < session_.options.max_inflight
-    packet_id/int? := null
-    if qos == 1:
-      packet_id = session_.next_packet_id
-      // We need to mark the packet as pending before sending it, as we might
-      // receive an ack as soon as we sent it. We might not have the time
-      // to notify the session of the pending packet.
-      session_.set_pending_ack topic payload --packet_id=packet_id --retain=retain
-    try:
-      send_publish_ topic payload --packet_id=packet_id --qos=qos --retain=retain
-    finally: | is-exception _ |
-      if is-exception:
-        // Drop the packet from the persistence store again.
-        if qos == 1: session_.remove_pending packet_id
+      packet_id := session_.next_packet_id
+      // We need to tell the session_ to keep acks for this packet id before we
+      // call 'set_pending_ack'. Otherwise we have a race condition where the
+      // broker can send the ack before the session is ready for it.
+      session_.hold_ack_for packet_id
+      try:
+        send_publish_ topic payload --packet_id=packet_id --qos=qos --retain=retain
+        session_.set_pending_ack topic payload --packet_id=packet_id --retain=retain
+      finally:
+        // Either 'set_pending_ack' was called, or we had an exception.
+        // Either way we don't need to do special ack-handling for this packet id anymore.
+        session_.restore_ack_handling_for packet_id
 
   /**
   Sends a $PublishPacket with the given $topic, $payload, $qos and $retain.
