@@ -113,7 +113,7 @@ class Client:
   start -> none
       --options /SessionOptions
       --background /bool = false
-      --on_error /Lambda = (:: /* do nothing */)
+      --on_error /Lambda = (:: /* Do nothing */)
       --reconnection_strategy /ReconnectionStrategy? = null
       --catch_all_callback /Lambda? = null:
     reconnection_strategy = reconnection_strategy or
