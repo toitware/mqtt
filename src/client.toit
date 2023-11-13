@@ -83,7 +83,7 @@ class Client:
   start -> none
       --client_id /string = ""
       --background /bool = false
-      --on_error /Lambda = (:: throw it)
+      --on_error /Lambda = (:: /* Do nothing. */)
       --reconnection_strategy /ReconnectionStrategy? = null
       --catch_all_callback /Lambda? = null:
     clean_session := client_id == ""
@@ -113,7 +113,7 @@ class Client:
   start -> none
       --options /SessionOptions
       --background /bool = false
-      --on_error /Lambda = (:: throw it)
+      --on_error /Lambda = (:: /* Do nothing */)
       --reconnection_strategy /ReconnectionStrategy? = null
       --catch_all_callback /Lambda? = null:
     reconnection_strategy = reconnection_strategy or
