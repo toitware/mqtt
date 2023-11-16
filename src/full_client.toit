@@ -93,16 +93,19 @@ class Connection_:
 
   closing_reason_ /any := null
 
+  logger_ /log.Logger
+
   keep_alive_duration_ /Duration?
   // TODO(florian): the following field should be typed as `Task?`.
   // However, that class is only available in Toit 2.0.
   activity_task_ /any := null
 
   /** Constructs a new connection. */
-  constructor .transport_ --keep_alive/Duration?:
+  constructor .transport_ --keep_alive/Duration? --logger/log.Logger:
     reader_ = reader.BufferedReader transport_
     writer_ = Writer transport_
     keep_alive_duration_ = keep_alive
+    logger_ = logger
 
 
   is_alive -> bool: return state_ == STATE_ALIVE_
@@ -172,6 +175,7 @@ class Connection_:
   */
   close --reason=null:
     if is_closed: return
+    logger_.debug "closing connection" --tags={"reason": reason}
     assert: closing_reason_ == null
     critical_do:
       closing_reason_ = reason
@@ -1190,14 +1194,18 @@ class FullClient:
 
       if not connection_:
         assert: is_initial_connection
-        connection_ = Connection_ transport_ --keep_alive=session_.options.keep_alive
+        connection_ = Connection_ transport_
+            --keep_alive=session_.options.keep_alive
+            --logger=logger_
 
       try:
         reconnection_strategy_.connect transport_
             --is_initial_connection = is_initial_connection
             --reconnect_transport = :
               transport_.reconnect
-              connection_ = Connection_ transport_ --keep_alive=session_.options.keep_alive
+              connection_ = Connection_ transport_
+                  --keep_alive=session_.options.keep_alive
+                  --logger=logger_
             --disconnect_transport = :
               transport_.disconnect
             --send_connect = :
