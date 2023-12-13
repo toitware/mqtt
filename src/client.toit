@@ -181,11 +181,15 @@ class Client:
   The $retain parameter lets the MQTT broker know whether it should retain this message. A new (later)
     subscription to this $topic would receive the retained message, instead of needing to wait for
     a new message on that topic.
-
   Not all MQTT brokers support $retain.
+
+  The $persistence-token parameter is used when a packet is sent with $qos equal to 1. In this case
+    the $PersistedPacket that is given to the $PersistenceStore contains this token. The persistence
+    store can use this information to avoid keeping the data in memory, or to clear data from
+    the flash.
   */
-  publish topic/string payload/ByteArray --qos=1 --retain=false:
-    client_.publish topic payload --qos=qos --retain=retain
+  publish topic/string payload/ByteArray --qos=1 --retain=false --persistence-token/any=null:
+    client_.publish topic payload --qos=qos --retain=retain --persistence-token=persistence-token
 
   /**
   Subscribes to a single $topic, with the provided $max-qos.
