@@ -199,6 +199,9 @@ interface ReconnectionStrategy:
   /**
   Is called when the client wants to establish a connection through the given $transport.
 
+  Returns null if the strategy has been closed.
+  Otherwise, returns whether the broker had a session for this client (the result of $receive-connect-ack).
+
   The strategy should first call $send-connect, followed by a $receive-connect-ack. If
     the connection is unsuccessful, it may retry.
 
@@ -211,7 +214,7 @@ interface ReconnectionStrategy:
 
   The $is-initial-connection is true if this is the first time the client connects to the broker.
   */
-  connect -> none
+  connect -> bool?
       transport/ActivityMonitoringTransport
       --is-initial-connection /bool
       [--reconnect-transport]
@@ -287,7 +290,8 @@ abstract class ReconnectionStrategyBase implements ReconnectionStrategy:
   Returns null if the strategy was closed.
   Returns whether the broker had a session for this client, otherwise.
   */
-  do-connect transport/ActivityMonitoringTransport
+  do-connect -> bool?
+      transport/ActivityMonitoringTransport
       --reuse-connection/bool=false
       [--reconnect-transport]
       [--disconnect-transport]
@@ -335,7 +339,7 @@ abstract class ReconnectionStrategyBase implements ReconnectionStrategy:
 
     unreachable
 
-  abstract connect -> none
+  abstract connect -> bool
       transport/ActivityMonitoringTransport
       --is-initial-connection /bool
       [--reconnect-transport]
@@ -399,7 +403,7 @@ class NoReconnectionStrategy extends ReconnectionStrategyBase:
         --delay-lambda=delay-lambda
         --attempt-delays=attempt-delays
 
-  connect -> none
+  connect -> bool?
       transport/ActivityMonitoringTransport
       --is-initial-connection /bool
       [--reconnect-transport]
@@ -407,9 +411,10 @@ class NoReconnectionStrategy extends ReconnectionStrategyBase:
       [--send-connect]
       [--receive-connect-ack]
       [--disconnect]:
+    if is-closed: return null
     // No reconnect.
     if not is-initial-connection: throw "NO RECONNECT STRATEGY"
-    session-exists := do-connect transport
+    return do-connect transport
         --reuse-connection = is-initial-connection
         --reconnect-transport = reconnect-transport
         --disconnect-transport = disconnect-transport
@@ -462,7 +467,7 @@ class RetryReconnectionStrategy extends ReconnectionStrategyBase:
         --delay-lambda=delay-lambda
         --attempt-delays=attempt-delays
 
-  connect -> none
+  connect -> bool?
       transport/ActivityMonitoringTransport
       --is-initial-connection /bool
       [--reconnect-transport]
@@ -470,19 +475,12 @@ class RetryReconnectionStrategy extends ReconnectionStrategyBase:
       [--send-connect]
       [--receive-connect-ack]
       [--disconnect]:
-    session-exists := do-connect transport
+    return do-connect transport
         --reuse-connection = is-initial-connection
         --reconnect-transport = reconnect-transport
         --disconnect-transport = disconnect-transport
         --send-connect = send-connect
         --receive-connect-ack = receive-connect-ack
-
-    if is-initial-connection or session-exists: return
-
-    // The session was reset.
-    // Disconnect and throw. If the user wants to, they should create a new client.
-    catch: disconnect.call
-    throw "SESSION_EXPIRED"
 
   should-try-reconnect transport/ActivityMonitoringTransport -> bool:
     return transport.supports-reconnect
@@ -544,7 +542,7 @@ class TenaciousReconnectionStrategy extends ReconnectionStrategyBase:
         --receive-connect-timeout=receive-connect-timeout
         --delay-lambda=delay-lambda
 
-  connect -> none
+  connect -> bool?
       transport/ActivityMonitoringTransport
       --is-initial-connection /bool
       [--reconnect-transport]
@@ -552,16 +550,12 @@ class TenaciousReconnectionStrategy extends ReconnectionStrategyBase:
       [--send-connect]
       [--receive-connect-ack]
       [--disconnect]:
-    session-exists := do-connect transport
+    return do-connect transport
         --reuse-connection = is-initial-connection
         --reconnect-transport = reconnect-transport
         --disconnect-transport = disconnect-transport
         --send-connect = send-connect
         --receive-connect-ack = receive-connect-ack
-
-    // We don't care if the session exists or not.
-    // This strategy just wants to reconnect.
-    return
 
   should-try-reconnect transport/ActivityMonitoringTransport -> bool:
     return transport.supports-reconnect
@@ -1261,8 +1255,9 @@ class FullClient:
             --keep-alive=session_.options.keep-alive
             --logger=logger_
 
+      should-force-close := true
       try:
-        reconnection-strategy_.connect transport_
+        had-session := reconnection-strategy_.connect transport_
             --is-initial-connection = is-initial-connection
             --reconnect-transport = :
               transport_.reconnect
@@ -1296,24 +1291,28 @@ class FullClient:
               ack.session-present
             --disconnect = :
               connection_.write DisconnectPacket
+
+        // If we are here, then the reconnection succeeded.
+        // If we throw now, then we should go through the standard way of dealing with a disconnect.
+        should-force-close = false
+
+        // Make sure the connection sends pings so the broker doesn't drop us.
+        connection_.keep-alive --background
+
+        // Resend the pending messages.
+        // If we didn't have a session, then we just send the data again. We might send the data too
+        // often, but there isn't much we can do.
+        session_.do --pending: | persisted/PersistedPacket |
+          packet-id := persisted.packet-id
+          topic := persisted.topic
+          payload := persisted.payload
+          retain := persisted.retain
+          packet := PublishPacket topic payload --packet-id=packet-id --qos=1 --retain=retain --duplicate=had-session
+          connection_.write packet
+
       finally: | is-exception exception |
-        if is-exception:
+        if is-exception and should-force-close:
           close --force
-
-      // If we are here, then the reconnection succeeded.
-
-      // Make sure the connection sends pings so the broker doesn't drop us.
-      connection_.keep-alive --background
-
-      // Resend the pending messages.
-      session_.do --pending: | persisted/PersistedPacket |
-        packet-id := persisted.packet-id
-        topic := persisted.topic
-        payload := persisted.payload
-        retain := persisted.retain
-        packet := PublishPacket topic payload --packet-id=packet-id --qos=1 --retain=retain --duplicate
-        connection_.write packet
-
   /** Tears down the client. */
   tear-down_:
     critical-do:

@@ -19,7 +19,7 @@ import .packet-test-client
 Tests that the persistence store stores unsent packets, and that a new
   client can reuse that persistence store.
 */
-test create-transport/Lambda --logger/log.Logger:
+test create-transport/Lambda --clean-session/bool --logger/log.Logger:
   persistence-store := mqtt.MemoryPersistenceStore
   id := "persistence_client_id"
 
@@ -34,6 +34,7 @@ test create-transport/Lambda --logger/log.Logger:
 
   with-packet-client create-transport
       --client-id = id
+      --clean-session = clean-session
       --write-filter = write-filter
       --persistence-store = persistence-store
       --logger=logger: | client/mqtt.FullClient wait-for-idle/Lambda _ _ |
@@ -66,6 +67,7 @@ test create-transport/Lambda --logger/log.Logger:
   // We reconnect with a new client reusing the same persistence store.
   with-packet-client create-transport
       --client-id = id
+      --clean-session = clean-session
       --persistence-store = persistence-store
       --read-filter = read-filter
       --logger=logger: | client/mqtt.FullClient wait-for-idle/Lambda _ get-activity/Lambda |
@@ -87,12 +89,15 @@ test create-transport/Lambda --logger/log.Logger:
     publish-packets := (activity.filter: it[0] == "write" and it[1] is mqtt.PublishPacket).map: it[1]
     publish-packets.filter --in-place: it.topic == "to_be_intercepted"
     expect-equals 1 publish-packets.size
+    expect-equals (not clean-session) publish-packets[0].duplicate
 
 main args:
   test-with-mosquitto := args.contains "--mosquitto"
   log-level := log.ERROR-LEVEL
   logger := log.default.with-level log-level
 
-  run-test := : | create-transport/Lambda | test create-transport --logger=logger
+  run-test := : | create-transport/Lambda |
+    test create-transport --logger=logger --clean-session
+    test create-transport --logger=logger --no-clean-session
   if test-with-mosquitto: with-mosquitto --logger=logger run-test
   else: with-internal-broker --logger=logger run-test
