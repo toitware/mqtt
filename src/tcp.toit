@@ -25,33 +25,33 @@ class TcpTransport implements Transport BrokerTransport:
   constructor socket/tcp.Socket:
     socket_ = socket
 
-  /** Deprecated. Use $(constructor --net_open --host) instead. */
+  /** Deprecated. Use $(constructor --net-open --host) instead. */
   constructor network/net.Interface --host/string --port/int=1883:
-    return ReconnectingTransport_ network --net_open=null --host=host --port=port
+    return ReconnectingTransport_ network --net-open=null --host=host --port=port
 
-  constructor --host/string --port/int=1883 --net_open/Lambda=(:: net.open):
-    return ReconnectingTransport_ null --net_open=net_open --host=host --port=port
+  constructor --host/string --port/int=1883 --net-open/Lambda=(:: net.open):
+    return ReconnectingTransport_ null --net-open=net-open --host=host --port=port
 
-  /** Deprecated. Use $(TcpTransport.tls --net_open --host) instead. */
+  /** Deprecated. Use $(TcpTransport.tls --net-open --host) instead. */
   constructor.tls network/net.Interface --host/string --port/int=8883
-      --root_certificates/List=[]
-      --server_name/string?=null
+      --root-certificates/List=[]
+      --server-name/string?=null
       --certificate/tls.Certificate?=null:
-    return ReconnectingTlsTransport_ network --net_open=null --host=host --port=port
-      --root_certificates=root_certificates
-      --server_name=server_name
+    return ReconnectingTlsTransport_ network --net-open=null --host=host --port=port
+      --root-certificates=root-certificates
+      --server-name=server-name
       --certificate=certificate
 
-  constructor.tls --host/string --port/int=8883 --net_open/Lambda=(:: net.open)
-      --root_certificates/List=[]
-      --server_name/string?=null
+  constructor.tls --host/string --port/int=8883 --net-open/Lambda=(:: net.open)
+      --root-certificates/List=[]
+      --server-name/string?=null
       --certificate/tls.Certificate?=null:
-    return ReconnectingTlsTransport_ null --net_open=net_open --host=host --port=port
-      --root_certificates=root_certificates
-      --server_name=server_name
+    return ReconnectingTlsTransport_ null --net-open=net-open --host=host --port=port
+      --root-certificates=root-certificates
+      --server-name=server-name
       --certificate=certificate
 
-  constructor.from_subclass_ .socket_:
+  constructor.from-subclass_ .socket_:
 
   write bytes/ByteArray -> int:
     return socket_.write bytes
@@ -63,10 +63,10 @@ class TcpTransport implements Transport BrokerTransport:
     if socket_: socket_.close
     socket_ = null
 
-  is_closed -> bool:
+  is-closed -> bool:
     return socket_ == null
 
-  supports_reconnect -> bool:
+  supports-reconnect -> bool:
     return false
 
   reconnect -> none:
@@ -82,15 +82,15 @@ class ReconnectingTransport_ extends TcpTransport:
   port_    /int
   open_    /Lambda?
 
-  reconnecting_mutex_ /monitor.Mutex := monitor.Mutex
+  reconnecting-mutex_ /monitor.Mutex := monitor.Mutex
 
-  constructor .network_ --net_open/Lambda? --host/string --port/int=1883:
-    if not network_ and not net_open: throw "Either network or net_open must be provided"
-    if network_ and net_open: throw "Only one of network or net_open must be provided"
+  constructor .network_ --net-open/Lambda? --host/string --port/int=1883:
+    if not network_ and not net-open: throw "Either network or net_open must be provided"
+    if network_ and net-open: throw "Only one of network or net_open must be provided"
     host_ = host
     port_ = port
-    open_ = net_open
-    super.from_subclass_ null
+    open_ = net-open
+    super.from-subclass_ null
     reconnect
 
   write bytes/ByteArray -> int:
@@ -108,30 +108,30 @@ class ReconnectingTransport_ extends TcpTransport:
 
   reconnect:
     if not network_: network_ = open_.call
-    old_socket := socket_
-    reconnecting_mutex_.do:
-      if not identical old_socket socket_: return
-      if old_socket: old_socket.close
+    old-socket := socket_
+    reconnecting-mutex_.do:
+      if not identical old-socket socket_: return
+      if old-socket: old-socket.close
 
       // TODO(florian): we dynamically try to call `no_delay = true` or
       // `set_no_delay true`. The first is for newer Toit versions, the latter
       // for older versions.
       // Eventually we should stop supporting old versions.
-      socket /any := new_connection_
+      socket /any := new-connection_
       // Send messages immediately.
       exception := catch:
-        socket.no_delay = true
+        socket.no-delay = true
       if exception:
-        socket.set_no_delay true
+        socket.set-no-delay true
 
       // Set the new socket_ at the very end. This way we will try to
       // reconnect again if we are interrupted by a timeout.
       socket_ = socket
 
-  new_connection_ -> tcp.Socket:
-    return network_.tcp_connect host_ port_
+  new-connection_ -> tcp.Socket:
+    return network_.tcp-connect host_ port_
 
-  supports_reconnect -> bool:
+  supports-reconnect -> bool:
     return true
 
   disconnect:
@@ -143,22 +143,22 @@ class ReconnectingTransport_ extends TcpTransport:
 
 class ReconnectingTlsTransport_ extends ReconnectingTransport_:
   certificate_ /tls.Certificate?
-  server_name_ /string?
-  root_certificates_ /List
+  server-name_ /string?
+  root-certificates_ /List
 
-  constructor network/net.Interface? --net_open/Lambda? --host/string --port/int
-      --root_certificates/List=[]
-      --server_name/string?=null
+  constructor network/net.Interface? --net-open/Lambda? --host/string --port/int
+      --root-certificates/List=[]
+      --server-name/string?=null
       --certificate/tls.Certificate?=null:
-    root_certificates_ = root_certificates
-    server_name_ = server_name
+    root-certificates_ = root-certificates
+    server-name_ = server-name
     certificate_ = certificate
-    super network --net_open=net_open --host=host --port=port
+    super network --net-open=net-open --host=host --port=port
 
-  new_connection_ -> tcp.Socket:
-    socket := network_.tcp_connect host_ port_
+  new-connection_ -> tcp.Socket:
+    socket := network_.tcp-connect host_ port_
     socket = tls.Socket.client socket
-      --server_name=server_name_ or host_
+      --server-name=server-name_ or host_
       --certificate=certificate_
-      --root_certificates=root_certificates_
+      --root-certificates=root-certificates_
     return socket

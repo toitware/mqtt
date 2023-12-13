@@ -10,25 +10,25 @@ Adafruit is free, but has some limitations. For example, one can only publish
 
 Before running this program:
 - create an account at https://io.adafruit.com/
-- create a feed: https://io.adafruit.com/$ADAFRUIT_IO_USERNAME/feeds (replace the $ADAFRUIT_IO_USERNAME with your username)
-- update the $ADAFRUIT_IO_USERNAME, $ADAFRUIT_IO_KEY, and $ADAFRUIT_IO_FEEDNAME constants.
+- create a feed: https://io.adafruit.com/$ADAFRUIT-IO-USERNAME/feeds (replace the $ADAFRUIT-IO-USERNAME with your username)
+- update the $ADAFRUIT-IO-USERNAME, $ADAFRUIT-IO-KEY, and $ADAFRUIT-IO-FEEDNAME constants.
 */
 
 import mqtt
-import certificate_roots
+import certificate-roots
 
-ADAFRUIT_IO_USERNAME ::= "<YOUR_USERNAME>"
+ADAFRUIT-IO-USERNAME ::= "<YOUR_USERNAME>"
 
 // From io.adafruit.com/$ADAFRUIT_IO_USERNAME/dashboards -> click "My Key"
-ADAFRUIT_IO_KEY ::= "<YOUR_KEY>"
+ADAFRUIT-IO-KEY ::= "<YOUR_KEY>"
 
-ADAFRUIT_IO_FEEDNAME ::= "<YOUR_FEEDNAME>"
+ADAFRUIT-IO-FEEDNAME ::= "<YOUR_FEEDNAME>"
 
 HOST ::= "io.adafruit.com"
 
 main:
   client := mqtt.Client.tls --host=HOST
-      --root_certificates=[ certificate_roots.DIGICERT_GLOBAL_ROOT_CA ]
+      --root-certificates=[ certificate-roots.DIGICERT-GLOBAL-ROOT-CA ]
   /**
   // Alternatively, you can also connect without TLS, by using the
   // following client:
@@ -37,21 +37,21 @@ main:
   */
 
   options := mqtt.SessionOptions
-    --client_id = "toit-example-client"
-    --username = ADAFRUIT_IO_USERNAME
-    --password = ADAFRUIT_IO_KEY
+    --client-id = "toit-example-client"
+    --username = ADAFRUIT-IO-USERNAME
+    --password = ADAFRUIT-IO-KEY
 
   client.start --options=options
 
   print "Connected to broker"
 
-  topic := "$ADAFRUIT_IO_USERNAME/feeds/$ADAFRUIT_IO_FEEDNAME"
+  topic := "$ADAFRUIT-IO-USERNAME/feeds/$ADAFRUIT-IO-FEEDNAME"
 
   // Simulates a temperature sensor.
   temperature := 25.0
   10.repeat:
     temperature += ((random 100) - 50) / 100.0
-    client.publish topic "$temperature".to_byte_array
+    client.publish topic "$temperature".to-byte-array
     // Don't publish too often to avoid rate limiting.
     sleep --ms=2_500
 

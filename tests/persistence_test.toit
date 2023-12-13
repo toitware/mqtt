@@ -10,89 +10,89 @@ import mqtt.packets as mqtt
 import monitor
 import net
 
-import .broker_internal
-import .broker_mosquitto
+import .broker-internal
+import .broker-mosquitto
 import .transport
-import .packet_test_client
+import .packet-test-client
 
 /**
 Tests that the persistence store stores unsent packets, and that a new
   client can reuse that persistence store.
 */
-test create_transport/Lambda --logger/log.Logger:
-  persistence_store := mqtt.MemoryPersistenceStore
+test create-transport/Lambda --logger/log.Logger:
+  persistence-store := mqtt.MemoryPersistenceStore
   id := "persistence_client_id"
 
-  intercepting_writing := monitor.Latch
-  write_filter := :: | packet/mqtt.Packet |
+  intercepting-writing := monitor.Latch
+  write-filter := :: | packet/mqtt.Packet |
     if packet is mqtt.PublishPacket:
       publish := packet as mqtt.PublishPacket
       if publish.topic == "to_be_intercepted":
-        intercepting_writing.set true
-    if intercepting_writing.has_value: null
+        intercepting-writing.set true
+    if intercepting-writing.has-value: null
     else: packet
 
-  with_packet_client create_transport
-      --client_id = id
-      --write_filter = write_filter
-      --persistence_store = persistence_store
-      --logger=logger: | client/mqtt.FullClient wait_for_idle/Lambda _ _ |
+  with-packet-client create-transport
+      --client-id = id
+      --write-filter = write-filter
+      --persistence-store = persistence-store
+      --logger=logger: | client/mqtt.FullClient wait-for-idle/Lambda _ _ |
 
     // Use up one packet id.
-    client.publish "not_intercepted" "payload".to_byte_array --qos=1
+    client.publish "not_intercepted" "payload".to-byte-array --qos=1
 
-    wait_for_idle.call
+    wait-for-idle.call
 
     // The write-filter will not let this packet through and stop every future write.
-    client.publish "to_be_intercepted" "payload".to_byte_array --qos=1
+    client.publish "to_be_intercepted" "payload".to-byte-array --qos=1
 
-    intercepting_writing.get
+    intercepting-writing.get
 
     client.close --force
 
-    expect_equals 1 persistence_store.size
+    expect-equals 1 persistence-store.size
 
   // Delay ack packets that come back from the broker.
   // This is to ensure that we don't reuse IDs that haven't been
   // acked yet.
-  release_ack_packets := monitor.Latch
-  ack_ids := {}
-  read_filter := :: | packet/mqtt.Packet |
+  release-ack-packets := monitor.Latch
+  ack-ids := {}
+  read-filter := :: | packet/mqtt.Packet |
     if packet is mqtt.PubAckPacket:
-      release_ack_packets.get
-      ack_ids.add (packet as mqtt.PubAckPacket).packet_id
+      release-ack-packets.get
+      ack-ids.add (packet as mqtt.PubAckPacket).packet-id
     packet
 
   // We reconnect with a new client reusing the same persistence store.
-  with_packet_client create_transport
-      --client_id = id
-      --persistence_store = persistence_store
-      --read_filter = read_filter
-      --logger=logger: | client/mqtt.FullClient wait_for_idle/Lambda _ get_activity/Lambda |
+  with-packet-client create-transport
+      --client-id = id
+      --persistence-store = persistence-store
+      --read-filter = read-filter
+      --logger=logger: | client/mqtt.FullClient wait-for-idle/Lambda _ get-activity/Lambda |
 
-    client.publish "not_intercepted1" "another payload".to_byte_array --qos=1
-    client.publish "not_intercepted2" "another payload2".to_byte_array --qos=1
-    client.publish "not_intercepted3" "another payload3".to_byte_array --qos=1
-    release_ack_packets.set true
-    wait_for_idle.call
-    activity /List := get_activity.call
+    client.publish "not_intercepted1" "another payload".to-byte-array --qos=1
+    client.publish "not_intercepted2" "another payload2".to-byte-array --qos=1
+    client.publish "not_intercepted3" "another payload3".to-byte-array --qos=1
+    release-ack-packets.set true
+    wait-for-idle.call
+    activity /List := get-activity.call
     client.close
 
     // Check that no packet-id was reused and we have 4 different acks.
-    expect_equals 4 ack_ids.size
+    expect-equals 4 ack-ids.size
 
-    expect persistence_store.is_empty
+    expect persistence-store.is-empty
 
     // We check that the persisted packet is now sent and removed from the store.
-    publish_packets := (activity.filter: it[0] == "write" and it[1] is mqtt.PublishPacket).map: it[1]
-    publish_packets.filter --in_place: it.topic == "to_be_intercepted"
-    expect_equals 1 publish_packets.size
+    publish-packets := (activity.filter: it[0] == "write" and it[1] is mqtt.PublishPacket).map: it[1]
+    publish-packets.filter --in-place: it.topic == "to_be_intercepted"
+    expect-equals 1 publish-packets.size
 
 main args:
-  test_with_mosquitto := args.contains "--mosquitto"
-  log_level := log.ERROR_LEVEL
-  logger := log.default.with_level log_level
+  test-with-mosquitto := args.contains "--mosquitto"
+  log-level := log.ERROR-LEVEL
+  logger := log.default.with-level log-level
 
-  run_test := : | create_transport/Lambda | test create_transport --logger=logger
-  if test_with_mosquitto: with_mosquitto --logger=logger run_test
-  else: with_internal_broker --logger=logger run_test
+  run-test := : | create-transport/Lambda | test create-transport --logger=logger
+  if test-with-mosquitto: with-mosquitto --logger=logger run-test
+  else: with-internal-broker --logger=logger run-test

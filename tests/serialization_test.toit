@@ -7,25 +7,25 @@ import expect show *
 import reader
 
 import mqtt.packets as mqtt
-import mqtt.last_will as mqtt
-import mqtt.topic_qos as mqtt
+import mqtt.last-will as mqtt
+import mqtt.topic-qos as mqtt
 
-PACKET_ID_TESTS ::= [
+PACKET-ID-TESTS ::= [
     0,
     1,
     2,
     50_000,
 ]
 
-test_roundtrip packet/mqtt.Packet -> mqtt.Packet:
+test-roundtrip packet/mqtt.Packet -> mqtt.Packet:
   serialized := packet.serialize
   reader := reader.BufferedReader (bytes.Reader serialized)
   deserialized := mqtt.Packet.deserialize reader
   serialized2 := deserialized.serialize
-  expect_equals serialized serialized2
+  expect-equals serialized serialized2
   return deserialized
 
-test_connect:
+test-connect:
   TESTS ::= [
     {
       "client-id": "simple",
@@ -56,7 +56,7 @@ test_connect:
       "keep-alive": Duration --s=0,
       "last-will": {
         "topic": "last_will_topic",
-        "payload": "last_will_payload".to_byte_array,
+        "payload": "last_will_payload".to-byte-array,
         "retain": false,
         "qos": 0,
       },
@@ -68,7 +68,7 @@ test_connect:
       "keep-alive": Duration --s=60,
       "last-will": {
         "topic": "last_will_topic" * 10,
-        "payload": ("last_will_payload" * 10).to_byte_array,
+        "payload": ("last_will_payload" * 10).to-byte-array,
         "retain": true,
         "qos": 1,
       },
@@ -80,80 +80,80 @@ test_connect:
       "keep-alive": Duration --s=60,
       "last-will": {
         "topic": "last_will_topic" * 10,
-        "payload": ("last_will_payload" * 1000).to_byte_array,
+        "payload": ("last_will_payload" * 1000).to-byte-array,
         "retain": true,
         "qos": 1,
       },
     },
   ]
 
-  saw_last_will := false
+  saw-last-will := false
   TESTS.do: | test |
-    client_id := test["client-id"]
-    clean_session := test["clean-session"]
+    client-id := test["client-id"]
+    clean-session := test["clean-session"]
     username := test.get "username"
     password := test.get "password"
-    keep_alive := test["keep-alive"]
-    last_will_entry := test.get "last-will"
-    last_will /mqtt.LastWill? := null
-    if last_will_entry:
-      saw_last_will = true
-      last_will_topic := last_will_entry["topic"]
-      last_will_payload := last_will_entry["payload"]
-      last_will_retain := last_will_entry["retain"]
-      last_will_qos := last_will_entry["qos"]
-      last_will = mqtt.LastWill last_will_topic last_will_payload --qos=last_will_qos --retain=last_will_retain
+    keep-alive := test["keep-alive"]
+    last-will-entry := test.get "last-will"
+    last-will /mqtt.LastWill? := null
+    if last-will-entry:
+      saw-last-will = true
+      last-will-topic := last-will-entry["topic"]
+      last-will-payload := last-will-entry["payload"]
+      last-will-retain := last-will-entry["retain"]
+      last-will-qos := last-will-entry["qos"]
+      last-will = mqtt.LastWill last-will-topic last-will-payload --qos=last-will-qos --retain=last-will-retain
 
-    connect := mqtt.ConnectPacket client_id
-        --clean_session=clean_session
+    connect := mqtt.ConnectPacket client-id
+        --clean-session=clean-session
         --username=username
         --password=password
-        --keep_alive=keep_alive
-        --last_will=last_will
+        --keep-alive=keep-alive
+        --last-will=last-will
 
-    deserialized := (test_roundtrip connect) as mqtt.ConnectPacket
-    expect_equals client_id deserialized.client_id
-    expect_equals clean_session deserialized.clean_session
-    expect_equals username deserialized.username
-    expect_equals password deserialized.password
-    expect_equals keep_alive deserialized.keep_alive
-    if last_will_entry:
-      deserialized_last_will := deserialized.last_will
-      expect_equals last_will_entry["topic"] deserialized_last_will.topic
-      expect_equals last_will_entry["payload"] deserialized_last_will.payload
-      expect_equals last_will_entry["retain"] deserialized_last_will.retain
-      expect_equals last_will_entry["qos"] deserialized_last_will.qos
+    deserialized := (test-roundtrip connect) as mqtt.ConnectPacket
+    expect-equals client-id deserialized.client-id
+    expect-equals clean-session deserialized.clean-session
+    expect-equals username deserialized.username
+    expect-equals password deserialized.password
+    expect-equals keep-alive deserialized.keep-alive
+    if last-will-entry:
+      deserialized-last-will := deserialized.last-will
+      expect-equals last-will-entry["topic"] deserialized-last-will.topic
+      expect-equals last-will-entry["payload"] deserialized-last-will.payload
+      expect-equals last-will-entry["retain"] deserialized-last-will.retain
+      expect-equals last-will-entry["qos"] deserialized-last-will.qos
     else:
-      expect_null deserialized.last_will
+      expect-null deserialized.last-will
 
-  expect: saw_last_will
+  expect: saw-last-will
 
-test_connack:
+test-connack:
   TESTS ::= [
     0,
-    mqtt.ConnAckPacket.UNACCEPTABLE_PROTOCOL_VERSION,
-    mqtt.ConnAckPacket.IDENTIFIER_REJECTED,
-    mqtt.ConnAckPacket.SERVER_UNAVAILABLE,
-    mqtt.ConnAckPacket.BAD_USERNAME_OR_PASSWORD,
-    mqtt.ConnAckPacket.NOT_AUTHORIZED,
+    mqtt.ConnAckPacket.UNACCEPTABLE-PROTOCOL-VERSION,
+    mqtt.ConnAckPacket.IDENTIFIER-REJECTED,
+    mqtt.ConnAckPacket.SERVER-UNAVAILABLE,
+    mqtt.ConnAckPacket.BAD-USERNAME-OR-PASSWORD,
+    mqtt.ConnAckPacket.NOT-AUTHORIZED,
   ]
 
-  TESTS.do: | test_code |
+  TESTS.do: | test-code |
     2.repeat:
-      session_present := it == 0
+      session-present := it == 0
       // The specification requires that the session_present is false when there is a
       // return-code that is different from 0.
       // We still test all combinations.
-      connack := mqtt.ConnAckPacket --return_code=test_code --session_present=session_present
-      deserialized := (test_roundtrip connack) as mqtt.ConnAckPacket
-      expect_equals test_code deserialized.return_code
-      expect_equals session_present deserialized.session_present
+      connack := mqtt.ConnAckPacket --return-code=test-code --session-present=session-present
+      deserialized := (test-roundtrip connack) as mqtt.ConnAckPacket
+      expect-equals test-code deserialized.return-code
+      expect-equals session-present deserialized.session-present
 
-test_publish:
+test-publish:
   TESTS ::= [
     {
       "topic": "topic",
-      "payload": "payload".to_byte_array,
+      "payload": "payload".to-byte-array,
       "qos": 0,
       "retain": false,
       "packet-id": null,
@@ -161,7 +161,7 @@ test_publish:
     },
     {
       "topic": "topic",
-      "payload": ("huge payload" * 1000).to_byte_array,
+      "payload": ("huge payload" * 1000).to-byte-array,
       "qos": 1,
       "retain": true,
       "packet-id": 50_000,
@@ -169,7 +169,7 @@ test_publish:
     },
     {
       "topic": "foo/bar/gee",
-      "payload": "bar".to_byte_array,
+      "payload": "bar".to-byte-array,
       "qos": 0,
       "retain": false,
       "packet-id": null,
@@ -182,30 +182,30 @@ test_publish:
     payload := test["payload"]
     qos := test["qos"]
     retain := test["retain"]
-    packet_id := test["packet-id"]
+    packet-id := test["packet-id"]
     duplicate := test["duplicate"]
     publish := mqtt.PublishPacket topic payload
         --qos = qos
         --retain = retain
-        --packet_id = packet_id
+        --packet-id = packet-id
         --duplicate = duplicate
 
-    deserialized := (test_roundtrip publish) as mqtt.PublishPacket
-    expect_equals topic deserialized.topic
-    expect_equals payload.size deserialized.payload.size
-    expect_equals payload deserialized.payload
-    expect_equals qos deserialized.qos
-    expect_equals retain deserialized.retain
-    expect_equals packet_id deserialized.packet_id
-    expect_equals duplicate deserialized.duplicate
+    deserialized := (test-roundtrip publish) as mqtt.PublishPacket
+    expect-equals topic deserialized.topic
+    expect-equals payload.size deserialized.payload.size
+    expect-equals payload deserialized.payload
+    expect-equals qos deserialized.qos
+    expect-equals retain deserialized.retain
+    expect-equals packet-id deserialized.packet-id
+    expect-equals duplicate deserialized.duplicate
 
-test_puback:
-  PACKET_ID_TESTS.do: | packet_id |
-    puback := mqtt.PubAckPacket --packet_id=packet_id
-    deserialized := (test_roundtrip puback) as mqtt.PubAckPacket
-    expect_equals packet_id deserialized.packet_id
+test-puback:
+  PACKET-ID-TESTS.do: | packet-id |
+    puback := mqtt.PubAckPacket --packet-id=packet-id
+    deserialized := (test-roundtrip puback) as mqtt.PubAckPacket
+    expect-equals packet-id deserialized.packet-id
 
-test_subscribe:
+test-subscribe:
   TESTS ::= [
     {
       "packet-id": 0,
@@ -234,23 +234,23 @@ test_subscribe:
   ]
 
   TESTS.do: | test |
-    packet_id := test["packet-id"]
-    topic_qos_values := test["filters"]
-    topic_qoses := topic_qos_values.map: | values |
+    packet-id := test["packet-id"]
+    topic-qos-values := test["filters"]
+    topic-qoses := topic-qos-values.map: | values |
       topic := values[0]
-      max_qos := values[1]
-      mqtt.TopicQos topic --max_qos=max_qos
-    subscribe := mqtt.SubscribePacket --packet_id=packet_id topic_qoses
-    deserialized := (test_roundtrip subscribe) as mqtt.SubscribePacket
-    expect_equals packet_id deserialized.packet_id
-    expect_equals topic_qos_values.size deserialized.topics.size
-    topic_qos_values.size.repeat:
-      values := topic_qos_values[it]
-      topic_qos := deserialized.topics[it]
-      expect_equals values[0] topic_qos.topic
-      expect_equals values[1] topic_qos.max_qos
+      max-qos := values[1]
+      mqtt.TopicQos topic --max-qos=max-qos
+    subscribe := mqtt.SubscribePacket --packet-id=packet-id topic-qoses
+    deserialized := (test-roundtrip subscribe) as mqtt.SubscribePacket
+    expect-equals packet-id deserialized.packet-id
+    expect-equals topic-qos-values.size deserialized.topics.size
+    topic-qos-values.size.repeat:
+      values := topic-qos-values[it]
+      topic-qos := deserialized.topics[it]
+      expect-equals values[0] topic-qos.topic
+      expect-equals values[1] topic-qos.max-qos
 
-test_suback:
+test-suback:
   TESTS ::= [
     {
       "packet-id": 0,
@@ -267,15 +267,15 @@ test_suback:
   ]
 
   TESTS.do: | test |
-    packet_id := test["packet-id"]
-    qos_list := test["qos-list"]
-    suback := mqtt.SubAckPacket --packet_id=packet_id --qos=qos_list
-    deserialized := (test_roundtrip suback) as mqtt.SubAckPacket
-    expect_equals packet_id deserialized.packet_id
-    expect_equals qos_list.size deserialized.qos.size
-    expect_equals qos_list deserialized.qos
+    packet-id := test["packet-id"]
+    qos-list := test["qos-list"]
+    suback := mqtt.SubAckPacket --packet-id=packet-id --qos=qos-list
+    deserialized := (test-roundtrip suback) as mqtt.SubAckPacket
+    expect-equals packet-id deserialized.packet-id
+    expect-equals qos-list.size deserialized.qos.size
+    expect-equals qos-list deserialized.qos
 
-test_unsubscribe:
+test-unsubscribe:
   TESTS ::= [
     {
       "packet-id": 0,
@@ -296,44 +296,44 @@ test_unsubscribe:
   ]
 
   TESTS.do: | test |
-    packet_id := test["packet-id"]
+    packet-id := test["packet-id"]
     topics := test["filters"]
-    unsubscribe := mqtt.UnsubscribePacket --packet_id=packet_id topics
-    deserialized := (test_roundtrip unsubscribe) as mqtt.UnsubscribePacket
-    expect_equals packet_id deserialized.packet_id
-    expect_equals topics.size deserialized.topics.size
-    expect_equals topics deserialized.topics
+    unsubscribe := mqtt.UnsubscribePacket --packet-id=packet-id topics
+    deserialized := (test-roundtrip unsubscribe) as mqtt.UnsubscribePacket
+    expect-equals packet-id deserialized.packet-id
+    expect-equals topics.size deserialized.topics.size
+    expect-equals topics deserialized.topics
 
-test_unsuback:
-  PACKET_ID_TESTS.do: | packet_id |
-    unsuback := mqtt.UnsubAckPacket --packet_id=packet_id
-    deserialized := (test_roundtrip unsuback) as mqtt.UnsubAckPacket
-    expect_equals packet_id deserialized.packet_id
+test-unsuback:
+  PACKET-ID-TESTS.do: | packet-id |
+    unsuback := mqtt.UnsubAckPacket --packet-id=packet-id
+    deserialized := (test-roundtrip unsuback) as mqtt.UnsubAckPacket
+    expect-equals packet-id deserialized.packet-id
 
-test_pingreq:
+test-pingreq:
   pingreq := mqtt.PingReqPacket
-  deserialized := (test_roundtrip pingreq) as mqtt.PingReqPacket
+  deserialized := (test-roundtrip pingreq) as mqtt.PingReqPacket
 
-test_pingresp:
+test-pingresp:
   pingresp := mqtt.PingRespPacket
-  deserialized := (test_roundtrip pingresp) as mqtt.PingRespPacket
+  deserialized := (test-roundtrip pingresp) as mqtt.PingRespPacket
 
-test_disconnect:
+test-disconnect:
   disconnect := mqtt.DisconnectPacket
-  deserialized := (test_roundtrip disconnect) as mqtt.DisconnectPacket
+  deserialized := (test-roundtrip disconnect) as mqtt.DisconnectPacket
 
 main args:
-  test_with_mosquitto := args.contains "--mosquitto"
-  if test_with_mosquitto: return
+  test-with-mosquitto := args.contains "--mosquitto"
+  if test-with-mosquitto: return
 
-  test_connect
-  test_connack
-  test_publish
-  test_puback
-  test_subscribe
-  test_suback
-  test_unsubscribe
-  test_unsuback
-  test_pingreq
-  test_pingresp
-  test_disconnect
+  test-connect
+  test-connack
+  test-publish
+  test-puback
+  test-subscribe
+  test-suback
+  test-unsubscribe
+  test-unsuback
+  test-pingreq
+  test-pingresp
+  test-disconnect

@@ -3,10 +3,10 @@
 // found in the LICENSE file.
 
 import .client
-import .full_client
-import .session_options
+import .full-client
+import .session-options
 import .tcp
-import .last_will
-import .topic_qos
+import .last-will
+import .topic-qos
 
 export *

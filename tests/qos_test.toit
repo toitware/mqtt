@@ -10,108 +10,108 @@ import mqtt.transport as mqtt
 import mqtt.packets as mqtt
 import net
 
-import .broker_internal
-import .broker_mosquitto
+import .broker-internal
+import .broker-mosquitto
 import .transport
 
-test_publish client/mqtt.FullClient transport/TestTransport --auto_ack_enabled/bool --logger/log.Logger [--wait_for_idle]:
+test-publish client/mqtt.FullClient transport/TestTransport --auto-ack-enabled/bool --logger/log.Logger [--wait-for-idle]:
   2.repeat: | qos |
     transport.clear
-    client.publish "foo/bar/gee" "bar".to_byte_array --qos=qos
-    wait_for_idle.call
+    client.publish "foo/bar/gee" "bar".to-byte-array --qos=qos
+    wait-for-idle.call
 
     activity := transport.activity
-    expected_count := qos == 0 ? 3 : 4
-    expect_equals expected_count activity.size
-    expect_equals "write" activity[0][0]  // The publish.
+    expected-count := qos == 0 ? 3 : 4
+    expect-equals expected-count activity.size
+    expect-equals "write" activity[0][0]  // The publish.
     publish := activity[0][1] as mqtt.PublishPacket
     if qos == 0:
-      expect_null publish.packet_id
+      expect-null publish.packet-id
     else:
       response := activity[1][0] == "read" ? activity[1] : activity[2]
       ack := response[1] as mqtt.PubAckPacket
-      expect publish.packet_id == ack.packet_id
+      expect publish.packet-id == ack.packet-id
     // The other 2 packets are the idle packets.
 
-test_sub_unsub client/mqtt.FullClient transport/TestTransport --logger/log.Logger [--wait_for_idle]:
+test-sub-unsub client/mqtt.FullClient transport/TestTransport --logger/log.Logger [--wait-for-idle]:
   // Subscriptions always have qos=1.
   transport.clear
   client.subscribe "foo/bar"
-  wait_for_idle.call
+  wait-for-idle.call
 
   activity := transport.activity
-  expect_equals 4 activity.size
-  expect_equals "write" activity[0][0]  // The subscription.
+  expect-equals 4 activity.size
+  expect-equals "write" activity[0][0]  // The subscription.
   subscribe := activity[0][1] as mqtt.SubscribePacket
   response := activity[1][0] == "read" ? activity[1] : activity[2]
-  sub_ack := response[1] as mqtt.SubAckPacket
-  expect subscribe.packet_id == sub_ack.packet_id
+  sub-ack := response[1] as mqtt.SubAckPacket
+  expect subscribe.packet-id == sub-ack.packet-id
   // The other 2 packets are the idle packets.
 
   // Unsubscriptions always have qos=1.
   transport.clear
   client.unsubscribe "foo/bar"
-  wait_for_idle.call
+  wait-for-idle.call
 
   activity = transport.activity
-  expect_equals 4 activity.size
-  expect_equals "write" activity[0][0]  // The subscription.
+  expect-equals 4 activity.size
+  expect-equals "write" activity[0][0]  // The subscription.
   unsubscribe := activity[0][1] as mqtt.UnsubscribePacket
   response = activity[1][0] == "read" ? activity[1] : activity[2]
-  unsub_ack := response[1] as mqtt.UnsubAckPacket
-  expect unsubscribe.packet_id == unsub_ack.packet_id
+  unsub-ack := response[1] as mqtt.UnsubAckPacket
+  expect unsubscribe.packet-id == unsub-ack.packet-id
   // The other 2 packets are the idle packets.
 
-test_max_qos client/mqtt.FullClient transport/TestTransport --logger/log.Logger [--wait_for_idle]:
-  2.repeat: | max_qos |
-    topic := "foo/bar$max_qos"
-    client.subscribe topic --max_qos=max_qos
-    wait_for_idle.call
+test-max-qos client/mqtt.FullClient transport/TestTransport --logger/log.Logger [--wait-for-idle]:
+  2.repeat: | max-qos |
+    topic := "foo/bar$max-qos"
+    client.subscribe topic --max-qos=max-qos
+    wait-for-idle.call
 
-    2.repeat: | packet_qos |
+    2.repeat: | packet-qos |
       transport.clear
-      client.publish topic "bar".to_byte_array --qos=packet_qos
-      wait_for_idle.call
+      client.publish topic "bar".to-byte-array --qos=packet-qos
+      wait-for-idle.call
 
-      expect_count := 4
-      if packet_qos != 0:
+      expect-count := 4
+      if packet-qos != 0:
         // If the packet_qos is 0, then there will never be an ack.
-        expect_count++
+        expect-count++
         // If the packet qos is 1, then there might be another ack to the sub.
-        if max_qos != 0: expect_count++
+        if max-qos != 0: expect-count++
 
       activity := transport.activity
-      expect_equals expect_count activity.size
+      expect-equals expect-count activity.size
       reads := activity.filter: it[0] == "read"
       writes := activity.filter: it[0] == "write"
 
-      to_broker := writes[0][1] as mqtt.PublishPacket
-      expect_equals topic to_broker.topic
-      if packet_qos == 0:
-        expect_null to_broker.packet_id
+      to-broker := writes[0][1] as mqtt.PublishPacket
+      expect-equals topic to-broker.topic
+      if packet-qos == 0:
+        expect-null to-broker.packet-id
       else:
-        to_broker_ack := (reads.filter: it[1] is mqtt.PubAckPacket)[0][1]
-        expect_equals to_broker.packet_id to_broker_ack.packet_id
+        to-broker-ack := (reads.filter: it[1] is mqtt.PubAckPacket)[0][1]
+        expect-equals to-broker.packet-id to-broker-ack.packet-id
 
-      from_broker := (reads.filter: it[1] is mqtt.PublishPacket)[0][1]
-      if packet_qos == 0 or max_qos == 0:
-        expect_null from_broker.packet_id
+      from-broker := (reads.filter: it[1] is mqtt.PublishPacket)[0][1]
+      if packet-qos == 0 or max-qos == 0:
+        expect-null from-broker.packet-id
       else:
-        from_broker_ack := (writes.filter: it[1] is mqtt.PubAckPacket)[0][1]
-        expect_equals from_broker.packet_id from_broker_ack.packet_id
+        from-broker-ack := (writes.filter: it[1] is mqtt.PubAckPacket)[0][1]
+        expect-equals from-broker.packet-id from-broker-ack.packet-id
 
 /**
 Tests that the client and broker correctly ack packets.
 */
-test create_transport/Lambda --logger/log.Logger:
-  transport /mqtt.Transport := create_transport.call
-  logging_transport := TestTransport transport
-  client := mqtt.FullClient --transport=logging_transport --logger=logger
+test create-transport/Lambda --logger/log.Logger:
+  transport /mqtt.Transport := create-transport.call
+  logging-transport := TestTransport transport
+  client := mqtt.FullClient --transport=logging-transport --logger=logger
 
   // Mosquitto doesn't support zero-duration keep-alives.
   // Just set it to something really big.
-  options := mqtt.SessionOptions --client_id="test_client" --keep_alive=(Duration --s=10_000)
-      --clean_session
+  options := mqtt.SessionOptions --client-id="test_client" --keep-alive=(Duration --s=10_000)
+      --clean-session
   client.connect --options=options
 
   // We are going to use a "idle" ping packet to know when the broker is idle.
@@ -119,44 +119,44 @@ test create_transport/Lambda --logger/log.Logger:
   // it should be quite stable.
   idle := monitor.Semaphore
 
-  wait_for_idle := :
+  wait-for-idle := :
     client.publish "idle" #[] --qos=0
     idle.down
 
-  auto_ack := true
+  auto-ack := true
 
   task::
     client.handle: | packet/mqtt.Packet |
-      logger.info "received $(mqtt.Packet.debug_string_ packet)"
+      logger.info "received $(mqtt.Packet.debug-string_ packet)"
       if packet is mqtt.PublishPacket:
-        if not auto_ack: client.ack packet
+        if not auto-ack: client.ack packet
         if (packet as mqtt.PublishPacket).topic == "idle": idle.up
 
     logger.info "client shut down"
 
-  client.when_running:
-    client.subscribe "idle" --max_qos=0
-    wait_for_idle.call
+  client.when-running:
+    client.subscribe "idle" --max-qos=0
+    wait-for-idle.call
 
   2.repeat:
-    test_publish client logging_transport
+    test-publish client logging-transport
         --logger=logger
-        --auto_ack_enabled=auto_ack
-        --wait_for_idle=wait_for_idle
+        --auto-ack-enabled=auto-ack
+        --wait-for-idle=wait-for-idle
     // Disable auto-ack for the next iteration and the remaining tests.
-    auto_ack = false
+    auto-ack = false
 
 
-  test_sub_unsub client logging_transport --logger=logger --wait_for_idle=wait_for_idle
-  test_max_qos client logging_transport --logger=logger --wait_for_idle=wait_for_idle
+  test-sub-unsub client logging-transport --logger=logger --wait-for-idle=wait-for-idle
+  test-max-qos client logging-transport --logger=logger --wait-for-idle=wait-for-idle
 
   client.close
 
 main args:
-  test_with_mosquitto := args.contains "--mosquitto"
-  log_level := log.ERROR_LEVEL
-  logger := log.default.with_level log_level
+  test-with-mosquitto := args.contains "--mosquitto"
+  log-level := log.ERROR-LEVEL
+  logger := log.default.with-level log-level
 
-  run_test := : | create_transport/Lambda | test create_transport --logger=logger
-  if test_with_mosquitto: with_mosquitto --logger=logger run_test
-  else: with_internal_broker --logger=logger run_test
+  run-test := : | create-transport/Lambda | test create-transport --logger=logger
+  if test-with-mosquitto: with-mosquitto --logger=logger run-test
+  else: with-internal-broker --logger=logger run-test

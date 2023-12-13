@@ -10,72 +10,72 @@ import mqtt.transport as mqtt
 import mqtt.packets as mqtt
 import net
 
-import .broker_internal
-import .broker_mosquitto
-import .packet_test_client
+import .broker-internal
+import .broker-mosquitto
+import .packet-test-client
 import .transport
 
 main args:
-  test_with_mosquitto := args.contains "--mosquitto"
-  if test_with_mosquitto: return
+  test-with-mosquitto := args.contains "--mosquitto"
+  if test-with-mosquitto: return
 
-  log_level := log.ERROR_LEVEL
-  logger := log.default.with_level log_level
+  log-level := log.ERROR-LEVEL
+  logger := log.default.with-level log-level
 
-  run_test := : | create_transport/Lambda | test create_transport --logger=logger
-  with_internal_broker --logger=logger run_test
+  run-test := : | create-transport/Lambda | test create-transport --logger=logger
+  with-internal-broker --logger=logger run-test
 
 /**
 Tests that the client continues to reconnect if the transport reconnect fails.
 */
-test create_transport/Lambda --logger/log.Logger:
-  failing_transport /CallbackTestTransport? := null
+test create-transport/Lambda --logger/log.Logger:
+  failing-transport /CallbackTestTransport? := null
 
-  create_failing_transport := ::
-    transport := create_transport.call
-    failing_transport = CallbackTestTransport transport
-    failing_transport
+  create-failing-transport := ::
+    transport := create-transport.call
+    failing-transport = CallbackTestTransport transport
+    failing-transport
 
-  reconnection_strategy := mqtt.DefaultSessionReconnectionStrategy
-      --logger=logger.with_name "mqtt.reconnection_strategy"
-      --attempt_delays=[
+  reconnection-strategy := mqtt.DefaultSessionReconnectionStrategy
+      --logger=logger.with-name "mqtt.reconnection_strategy"
+      --attempt-delays=[
         Duration.ZERO,
         Duration.ZERO,
         Duration.ZERO,
       ]
 
-  with_packet_client create_failing_transport
-      --client_id = "disconnect-client1"
-      --no-clean_session
-      --reconnection_strategy = reconnection_strategy
-      --logger=logger: | client/mqtt.FullClient wait_for_idle/Lambda clear/Lambda get_activity/Lambda |
+  with-packet-client create-failing-transport
+      --client-id = "disconnect-client1"
+      --no-clean-session
+      --reconnection-strategy = reconnection-strategy
+      --logger=logger: | client/mqtt.FullClient wait-for-idle/Lambda clear/Lambda get-activity/Lambda |
 
-    is_destroyed := false
+    is-destroyed := false
 
-    reconnect_attempt := 0
-    reconnect_was_attempted := monitor.Latch
-    failing_transport.on_reconnect = ::
-      reconnect_attempt++
-      if reconnect_attempt == 0:
+    reconnect-attempt := 0
+    reconnect-was-attempted := monitor.Latch
+    failing-transport.on-reconnect = ::
+      reconnect-attempt++
+      if reconnect-attempt == 0:
         null
-      else if reconnect_attempt <= 2:
+      else if reconnect-attempt <= 2:
         throw "RECONNECTION FAILING"
       // Finally it connects again.
-      is_destroyed = false
+      is-destroyed = false
       null
 
-    failing_transport.on_write = ::
-      if is_destroyed: throw "destroyed transport"
+    failing-transport.on-write = ::
+      if is-destroyed: throw "destroyed transport"
 
-    wait_for_idle.call
+    wait-for-idle.call
     clear.call
 
     // Destroy the transport. From the client's side it looks as if all writes fail from now on.
-    is_destroyed = true
+    is-destroyed = true
 
-    write_failed_latch := monitor.Latch
+    write-failed-latch := monitor.Latch
 
     // This packet will make it through after several reconnection attempts.
     client.publish "failing" #[] --qos=0
 
-    expect reconnect_attempt > 2
+    expect reconnect-attempt > 2

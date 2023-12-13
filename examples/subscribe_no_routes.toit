@@ -20,13 +20,13 @@ Be default uses an MQTT broker on localhost.
 // change the client id, as well as the topic.
 HOST ::= "127.0.0.1"
 
-CLIENT_ID ::= "toit-subscribe-$(random)"
+CLIENT-ID ::= "toit-subscribe-$(random)"
 TOPIC ::= "toit/example/#"
 
 main:
   client := mqtt.Client --host=HOST
-  client.start --client_id="$(CLIENT_ID)-no-routes"
-      --on_error=:: print "Client error: $it"
+  client.start --client-id="$(CLIENT-ID)-no-routes"
+      --on-error=:: print "Client error: $it"
 
   client.subscribe TOPIC:: | topic payload |
-    print "Received: $topic: $payload.to_string_non_throwing"
+    print "Received: $topic: $payload.to-string-non-throwing"

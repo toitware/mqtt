@@ -2,7 +2,7 @@
 // Use of this source code is governed by an MIT-style license that can be
 // found in the LICENSE file.
 
-import .full_client // For toitdoc.
+import .full-client // For toitdoc.
 
 /**
 A last will.

@@ -8,8 +8,8 @@ A tree of topics-segments, matching a topic to a value.
 class TopicTree:
   root_ /TopicTreeNode_ := TopicTreeNode_ "ignored_root"
 
-  is_empty -> bool:
-    return root_.children.is_empty
+  is-empty -> bool:
+    return root_.children.is-empty
 
   /**
   Inserts, or replaces the value for the given topic.
@@ -18,9 +18,9 @@ class TopicTree:
   */
   set topic/string value/Object -> any:
     if topic == "": throw "INVALID_ARGUMENT"
-    topic_segments := topic.split "/"
+    topic-segments := topic.split "/"
     node /TopicTreeNode_ := root_
-    topic_segments.do: | segment |
+    topic-segments.do: | segment |
       node = node.children.get segment --init=: TopicTreeNode_ segment
     result := node.value_
     node.value_ = value
@@ -33,22 +33,22 @@ class TopicTree:
   */
   remove topic/string -> any:
     if topic == "": throw "INVALID_ARGUMENT"
-    topic_segments := topic.split "/"
+    topic-segments := topic.split "/"
     node /TopicTreeNode_? := root_
     // Keep track of the parent node where we can (maybe) remove the child node from.
     // Any parent that has more than one child or has a value must stay.
-    parent_to_remove_from /TopicTreeNode_? := null
-    topic_level_to_remove /string? := null
-    topic_segments.do: | segment |
+    parent-to-remove-from /TopicTreeNode_? := null
+    topic-level-to-remove /string? := null
+    topic-segments.do: | segment |
       if node == root_ or node.value_ or node.children.size > 1:
-        parent_to_remove_from = node
-        topic_level_to_remove = segment
+        parent-to-remove-from = node
+        topic-level-to-remove = segment
 
-      node = node.children.get segment --if_absent=: return null
+      node = node.children.get segment --if-absent=: return null
 
     result := node.value_
-    if node.children.is_empty:
-      parent_to_remove_from.children.remove topic_level_to_remove
+    if node.children.is-empty:
+      parent-to-remove-from.children.remove topic-level-to-remove
     else:
       node.value_ = null
 
@@ -59,37 +59,37 @@ class TopicTree:
   */
   do [block] -> none:
     root_.children.do: | segment/string node/TopicTreeNode_ |
-      do_all_ segment node block
+      do-all_ segment node block
 
-  do_all_ prefix/string node/TopicTreeNode_ [block] -> none:
+  do-all_ prefix/string node/TopicTreeNode_ [block] -> none:
     if node.value_: block.call prefix node.value_
     node.children.do: | segment/string child/TopicTreeNode_ |
-      do_all_ "$prefix/$segment" child block
+      do-all_ "$prefix/$segment" child block
 
   /**
   Calls $block on the most specialized entry that matches the given $topic.
 
   If none matches does not call the $block.
   */
-  do --most_specialized topic/string [block]:
-    if not most_specialized: throw "INVALID_ARGUMENT"
+  do --most-specialized topic/string [block]:
+    if not most-specialized: throw "INVALID_ARGUMENT"
     if topic == "": throw "INVALID_ARGUMENT"
-    topic_segments := topic.split "/"
+    topic-segments := topic.split "/"
     node /TopicTreeNode_? := root_
-    catch_all_node /TopicTreeNode_? := null
-    topic_segments.do: | segment |
-      new_catch_all_node := node.children.get "#"
-      if new_catch_all_node: catch_all_node = new_catch_all_node
+    catch-all-node /TopicTreeNode_? := null
+    topic-segments.do: | segment |
+      new-catch-all-node := node.children.get "#"
+      if new-catch-all-node: catch-all-node = new-catch-all-node
 
-      new_node := node.children.get segment
-      if not new_node: new_node = node.children.get "+"
-      if not new_node and not catch_all_node: return
-      if not new_node and catch_all_node:
-        block.call catch_all_node.value_
+      new-node := node.children.get segment
+      if not new-node: new-node = node.children.get "+"
+      if not new-node and not catch-all-node: return
+      if not new-node and catch-all-node:
+        block.call catch-all-node.value_
         return
-      node = new_node
+      node = new-node
     if node.value_: block.call node.value_
-    else if catch_all_node: block.call catch_all_node.value_
+    else if catch-all-node: block.call catch-all-node.value_
 
   /**
   Calls $block on all entries that match the given $topic.
@@ -98,36 +98,36 @@ class TopicTree:
   */
   do --all topic/string [block]:
     if topic == "": throw "INVALID_ARGUMENT"
-    topic_segments := topic.split "/"
-    do_ topic_segments 0 root_ block
+    topic-segments := topic.split "/"
+    do_ topic-segments 0 root_ block
 
-  do_ topic_segments/List index/int node/TopicTreeNode_? [block]:
-    for ; index < topic_segments.size; index++:
-      catch_all_node := node.children.get "#"
-      if catch_all_node: block.call catch_all_node.value_
+  do_ topic-segments/List index/int node/TopicTreeNode_? [block]:
+    for ; index < topic-segments.size; index++:
+      catch-all-node := node.children.get "#"
+      if catch-all-node: block.call catch-all-node.value_
 
-      one_level_node := node.children.get "+"
-      if one_level_node:
+      one-level-node := node.children.get "+"
+      if one-level-node:
         // Call recursively.
-        do_ topic_segments (index + 1) one_level_node block
+        do_ topic-segments (index + 1) one-level-node block
 
-      node = node.children.get topic_segments[index]
+      node = node.children.get topic-segments[index]
       if not node: return
     if node.value_: block.call node.value_
 
-  stringify [value_stringifier] -> string:
+  stringify [value-stringifier] -> string:
     result := ""
     root_.children.do: | key value |
-      result += stringify_ value key 0 value_stringifier
+      result += stringify_ value key 0 value-stringifier
     return result
 
-  stringify_ node name indentation/int [value_stringifier] -> string:
-    indentation_str := " " * indentation
-    result := "$indentation_str$name"
-    if node.value_: result += ": $(value_stringifier.call node.value_)"
+  stringify_ node name indentation/int [value-stringifier] -> string:
+    indentation-str := " " * indentation
+    result := "$indentation-str$name"
+    if node.value_: result += ": $(value-stringifier.call node.value_)"
     result += "\n"
     node.children.do: | key value |
-      result += stringify_ value "$key" (indentation + 2) value_stringifier
+      result += stringify_ value "$key" (indentation + 2) value-stringifier
     return result
 
 class TopicTreeNode_:

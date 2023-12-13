@@ -34,12 +34,12 @@ interface Transport implements reader.Reader:
   /**
   Whether this transport supports reconnecting.
   */
-  supports_reconnect -> bool
+  supports-reconnect -> bool
 
   /**
   Reconnects the transport.
 
-  If the transport $supports_reconnect, it should try to reconnect.
+  If the transport $supports-reconnect, it should try to reconnect.
   Normally, the transport is in a closed state when reconnect is called.
   */
   reconnect -> none
@@ -56,9 +56,9 @@ interface Transport implements reader.Reader:
 
   /**
   Whether the transport is closed.
-  If it $supports_reconnect then calling $reconnect reopens the transport.
+  If it $supports-reconnect then calling $reconnect reopens the transport.
   */
-  is_closed -> bool
+  is-closed -> bool
 
 /**
 A transport that monitors activity on a wrapped transport.
@@ -68,49 +68,49 @@ The MQTT library automatically wraps transports in actvity-monitoring
   class themselves.
 */
 class ActivityMonitoringTransport implements Transport:
-  wrapped_transport_ / Transport
+  wrapped-transport_ / Transport
 
-  is_writing /bool := false
-  writing_since_us /int? := null
-  last_write_us /int? := null
+  is-writing /bool := false
+  writing-since-us /int? := null
+  last-write-us /int? := null
 
-  is_reading /bool := false
-  reading_since_us /int? := null
-  last_read_us /int? := null
+  is-reading /bool := false
+  reading-since-us /int? := null
+  last-read-us /int? := null
 
-  constructor.private_ .wrapped_transport_:
+  constructor.private_ .wrapped-transport_:
 
   write bytes/ByteArray -> int:
     try:
-      is_writing = true
-      writing_since_us = Time.monotonic_us
-      result := wrapped_transport_.write bytes
-      last_write_us = Time.monotonic_us
+      is-writing = true
+      writing-since-us = Time.monotonic-us
+      result := wrapped-transport_.write bytes
+      last-write-us = Time.monotonic-us
       return result
     finally:
-      is_writing = false
+      is-writing = false
 
   read -> ByteArray?:
     try:
-      is_reading = true
-      reading_since_us = Time.monotonic_us
-      result := wrapped_transport_.read
-      last_read_us = Time.monotonic_us
+      is-reading = true
+      reading-since-us = Time.monotonic-us
+      result := wrapped-transport_.read
+      last-read-us = Time.monotonic-us
       return result
     finally:
-      is_reading = false
+      is-reading = false
 
   close -> none:
-    wrapped_transport_.close
+    wrapped-transport_.close
 
-  supports_reconnect -> bool:
-    return wrapped_transport_.supports_reconnect
+  supports-reconnect -> bool:
+    return wrapped-transport_.supports-reconnect
 
   reconnect -> none:
-    wrapped_transport_.reconnect
+    wrapped-transport_.reconnect
 
   disconnect -> none:
-    wrapped_transport_.disconnect
+    wrapped-transport_.disconnect
 
-  is_closed -> bool:
-    return wrapped_transport_.is_closed
+  is-closed -> bool:
+    return wrapped-transport_.is-closed

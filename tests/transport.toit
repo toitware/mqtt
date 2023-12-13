@@ -21,16 +21,16 @@ class TestClientTransport implements mqtt.Transport:
     reconnect
 
   write bytes/ByteArray -> int:
-    pipe_.client_write bytes
+    pipe_.client-write bytes
     return bytes.size
 
   read -> ByteArray?:
-    return pipe_.client_read
+    return pipe_.client-read
 
   close -> none:
-    pipe_.client_close
+    pipe_.client-close
 
-  supports_reconnect -> bool:
+  supports-reconnect -> bool:
     return true
 
   reconnect -> none:
@@ -38,8 +38,8 @@ class TestClientTransport implements mqtt.Transport:
 
   disconnect -> none:
 
-  is_closed -> bool:
-    return pipe_.client_is_closed
+  is-closed -> bool:
+    return pipe_.client-is-closed
 
 class TestBrokerTransport implements broker.BrokerTransport:
   pipe_ /TestTransportPipe
@@ -47,26 +47,26 @@ class TestBrokerTransport implements broker.BrokerTransport:
   constructor .pipe_:
 
   write bytes/ByteArray -> int:
-    pipe_.broker_write bytes
+    pipe_.broker-write bytes
     return bytes.size
 
   read -> ByteArray?:
-    return pipe_.broker_read
+    return pipe_.broker-read
 
   close -> none:
-    pipe_.broker_close
+    pipe_.broker-close
 
 class TestServerTransport implements broker.ServerTransport:
   channel_ /monitor.Channel := monitor.Channel 5
 
-  is_closed /bool := false
+  is-closed /bool := false
 
   listen callback/Lambda -> none:
     while pipe := channel_.receive:
       callback.call (TestBrokerTransport pipe)
 
   connect -> TestTransportPipe:
-    if is_closed:
+    if is-closed:
       throw "Transport is closed"
 
     pipe := TestTransportPipe
@@ -74,65 +74,65 @@ class TestServerTransport implements broker.ServerTransport:
     return pipe
 
   close -> none:
-    is_closed = true
+    is-closed = true
     channel_.send null
 
 monitor TestTransportPipe:
-  client_to_broker_data_ /Deque := Deque
-  broker_to_client_data_ /Deque := Deque
+  client-to-broker-data_ /Deque := Deque
+  broker-to-client-data_ /Deque := Deque
 
-  closed_from_client_ /bool := false
-  closed_from_broker_ /bool := false
+  closed-from-client_ /bool := false
+  closed-from-broker_ /bool := false
 
-  client_write bytes/ByteArray -> none:
-    if is_closed_: throw "CLOSED"
-    client_to_broker_data_.add bytes
+  client-write bytes/ByteArray -> none:
+    if is-closed_: throw "CLOSED"
+    client-to-broker-data_.add bytes
 
-  client_read -> ByteArray?:
-    await: broker_to_client_data_.size > 0 or is_closed_
-    if closed_from_client_: throw "CLOSED"
-    if broker_to_client_data_.is_empty: return null
-    result := broker_to_client_data_.remove_first
+  client-read -> ByteArray?:
+    await: broker-to-client-data_.size > 0 or is-closed_
+    if closed-from-client_: throw "CLOSED"
+    if broker-to-client-data_.is-empty: return null
+    result := broker-to-client-data_.remove-first
     return result
 
-  client_close:
-    closed_from_client_ = true
+  client-close:
+    closed-from-client_ = true
 
-  client_is_closed -> bool:
-    return is_closed_
+  client-is-closed -> bool:
+    return is-closed_
 
-  broker_write bytes/ByteArray -> none:
-    if is_closed_: throw "CLOSED"
-    broker_to_client_data_.add bytes
+  broker-write bytes/ByteArray -> none:
+    if is-closed_: throw "CLOSED"
+    broker-to-client-data_.add bytes
 
-  broker_read -> ByteArray?:
-    await: client_to_broker_data_.size > 0 or is_closed_
-    if closed_from_broker_: throw "CLOSED"
-    if client_to_broker_data_.is_empty: return null
-    return client_to_broker_data_.remove_first
+  broker-read -> ByteArray?:
+    await: client-to-broker-data_.size > 0 or is-closed_
+    if closed-from-broker_: throw "CLOSED"
+    if client-to-broker-data_.is-empty: return null
+    return client-to-broker-data_.remove-first
 
-  broker_close:
-    closed_from_broker_ = true
+  broker-close:
+    closed-from-broker_ = true
 
-  broker_is_closed -> bool:
-    return is_closed_
+  broker-is-closed -> bool:
+    return is-closed_
 
-  is_closed_ -> bool:
-    return closed_from_client_ or closed_from_broker_
+  is-closed_ -> bool:
+    return closed-from-client_ or closed-from-broker_
 
 monitor Pipe_ implements reader.Reader:
   data_ /any := null
-  is_closed_ /bool := false
+  is-closed_ /bool := false
 
   read -> ByteArray?:
-    await: data_ or is_closed_
-    if is_closed_: return null
+    await: data_ or is-closed_
+    if is-closed_: return null
     result := data_
     data_ = null
     return result
 
   close:
-    is_closed_ = true
+    is-closed_ = true
 
   write bytes/ByteArray -> none:
     await: not data_
@@ -153,95 +153,95 @@ class TestTransport implements mqtt.Transport:
   activity_ := []
 
   // The bytes that have been read but aren't yet yielding a full packet.
-  pending_bytes_read_ := []
+  pending-bytes-read_ := []
   // The bytes that have been written but aren't yet yielding a full packet.
-  pending_bytes_write_ := []
+  pending-bytes-write_ := []
 
   wrapped_ /mqtt.Transport
-  read_filter_ /Lambda?
-  write_filter_ /Lambda?
+  read-filter_ /Lambda?
+  write-filter_ /Lambda?
 
-  read_task_ := null
-  read_channel_ /monitor.Channel := monitor.Channel 20
+  read-task_ := null
+  read-channel_ /monitor.Channel := monitor.Channel 20
 
   /**
   Keeps track of writes that need several `write` calls.
   We assume that the first attempt to $write always contains a full packet.
   Further attempts just write the rest of the packet.
   */
-  remaining_to_write_ /int := 0
-  packet_being_written_ /mqtt.Packet? := null
+  remaining-to-write_ /int := 0
+  packet-being-written_ /mqtt.Packet? := null
 
-  constructor .wrapped_ --read_filter/Lambda?=null --write_filter/Lambda?=null:
-    read_filter_ = read_filter
-    write_filter_ = write_filter
-    start_reading_
+  constructor .wrapped_ --read-filter/Lambda?=null --write-filter/Lambda?=null:
+    read-filter_ = read-filter
+    write-filter_ = write-filter
+    start-reading_
 
-  start_reading_ -> none:
-    if read_task_:
-      read_task_.cancel
-      old_channel := read_channel_
-      read_channel_ = monitor.Channel 20
-      old_channel.send null  // In case something is listening.
+  start-reading_ -> none:
+    if read-task_:
+      read-task_.cancel
+      old-channel := read-channel_
+      read-channel_ = monitor.Channel 20
+      old-channel.send null  // In case something is listening.
 
-    read_task_ = task --background::
-      should_unwind := false
-      exception_or_null := catch --unwind=should_unwind:
+    read-task_ = task --background::
+      should-unwind := false
+      exception-or-null := catch --unwind=should-unwind:
         // Some pending bytes that aren't in the intercepted reader anymore, but still
         // need to be sent.
         pending /ByteArray? := null
-        intercepting_reader := InterceptingReader_ wrapped_
-        buffered := reader.BufferedReader intercepting_reader
+        intercepting-reader := InterceptingReader_ wrapped_
+        buffered := reader.BufferedReader intercepting-reader
         while packet := mqtt.Packet.deserialize buffered:
-          if read_filter_:
-            packet = read_filter_.call packet
+          if read-filter_:
+            packet = read-filter_.call packet
           if not packet: continue
-          activity_.add [ "read", packet, Time.monotonic_us ]
+          activity_.add [ "read", packet, Time.monotonic-us ]
           serialized := packet.serialize
-          intercepted_bytes := intercepting_reader.intercepted
-          forwarded_count := 0
-          forwarded_bytes := #[]
-          while forwarded_count < serialized.size:
-            if not pending: pending = intercepted_bytes.remove_first
-            to_forward := ?
-            if pending.size + forwarded_count < serialized.size:
-              to_forward = pending
+          intercepted-bytes := intercepting-reader.intercepted
+          forwarded-count := 0
+          forwarded-bytes := #[]
+          while forwarded-count < serialized.size:
+            if not pending: pending = intercepted-bytes.remove-first
+            to-forward := ?
+            if pending.size + forwarded-count < serialized.size:
+              to-forward = pending
               pending = null
             else:
-              to_forward = pending[0..serialized.size - forwarded_count]
-              pending = pending[serialized.size - forwarded_count..]
-            read_channel_.send to_forward
-            forwarded_count += to_forward.size
-            forwarded_bytes += to_forward
-          if forwarded_bytes != serialized:
-            should_unwind = true
+              to-forward = pending[0..serialized.size - forwarded-count]
+              pending = pending[serialized.size - forwarded-count..]
+            read-channel_.send to-forward
+            forwarded-count += to-forward.size
+            forwarded-bytes += to-forward
+          if forwarded-bytes != serialized:
+            should-unwind = true
             throw "Serialized packet doesn't match forwarded bytes"
 
-      if exception_or_null is ByteArray: throw "UNEXPECTED EXCEPTION TYPE"
-      read_channel_.send exception_or_null
+      if exception-or-null is ByteArray: throw "UNEXPECTED EXCEPTION TYPE"
+      read-channel_.send exception-or-null
 
-  write byte_array/ByteArray -> int:
-    reader := reader.BufferedReader (bytes.Reader byte_array)
-    if remaining_to_write_ == 0:
+  write byte-array/ByteArray -> int:
+    reader := reader.BufferedReader (bytes.Reader byte-array)
+    if remaining-to-write_ == 0:
       // We assume that the first attempt to write bytes represent a full packet.
       packet := mqtt.Packet.deserialize reader
-      if write_filter_:
-        packet = write_filter_.call packet
-      if not packet: return byte_array.size
-      remaining_to_write_ = byte_array.size
-      packet_being_written_ = packet
+      if write-filter_:
+        packet = write-filter_.call packet
+      if not packet: return byte-array.size
+      remaining-to-write_ = byte-array.size
+      packet-being-written_ = packet
 
-    written := wrapped_.write byte_array
-    remaining_to_write_ -= written
-    if remaining_to_write_ == 0:
-      activity_.add [ "write", packet_being_written_, Time.monotonic_us ]
-      packet_being_written_ = null
+    written := wrapped_.write byte-array
+    remaining-to-write_ -= written
+    if remaining-to-write_ == 0:
+      activity_.add [ "write", packet-being-written_, Time.monotonic-us ]
+      packet-being-written_ = null
     return written
 
   read -> ByteArray?:
-    channel := read_channel_
+    channel := read-channel_
     result := channel.receive
-    if channel != read_channel_:
+    if channel != read-channel_:
       // The underlying channel was replaced.
       // Just start reading from the new one.
       return read
@@ -250,25 +250,25 @@ class TestTransport implements mqtt.Transport:
     return result
 
   close -> none:
-    activity_.add [ "close", Time.monotonic_us ]
+    activity_.add [ "close", Time.monotonic-us ]
     wrapped_.close
 
-  supports_reconnect -> bool:
-    return wrapped_.supports_reconnect
+  supports-reconnect -> bool:
+    return wrapped_.supports-reconnect
     return true
 
   reconnect -> none:
-    activity_.add [ "reconnect", Time.monotonic_us ]
+    activity_.add [ "reconnect", Time.monotonic-us ]
     wrapped_.reconnect
-    remaining_to_write_ = 0
-    start_reading_
+    remaining-to-write_ = 0
+    start-reading_
 
   disconnect -> none:
-    activity_.add [ "disconnect", Time.monotonic_us ]
+    activity_.add [ "disconnect", Time.monotonic-us ]
     wrapped_.disconnect
 
-  is_closed -> bool:
-    return wrapped_.is_closed
+  is-closed -> bool:
+    return wrapped_.is-closed
 
   clear -> none:
     activity_.clear
@@ -279,37 +279,37 @@ class TestTransport implements mqtt.Transport:
 class CallbackTestTransport implements mqtt.Transport:
   wrapped_ /mqtt.Transport
 
-  on_reconnect /Lambda? := null
-  on_disconnect /Lambda? := null
-  on_write /Lambda? := null
-  on_after_write /Lambda? := null
-  on_read /Lambda? := null
-  on_after_read /Lambda? := null
+  on-reconnect /Lambda? := null
+  on-disconnect /Lambda? := null
+  on-write /Lambda? := null
+  on-after-write /Lambda? := null
+  on-read /Lambda? := null
+  on-after-read /Lambda? := null
 
   constructor .wrapped_:
 
   write bytes/ByteArray -> int:
-    if on_write: on_write.call bytes
+    if on-write: on-write.call bytes
     result := wrapped_.write bytes
-    if on_after_write: on_after_write.call bytes result
+    if on-after-write: on-after-write.call bytes result
     return result
 
   read -> ByteArray?:
-    if on_read: return on_read.call wrapped_
+    if on-read: return on-read.call wrapped_
     result := wrapped_.read
-    if on_after_read: on_after_read.call result
+    if on-after-read: on-after-read.call result
     return result
 
   close -> none: wrapped_.close
 
-  supports_reconnect -> bool: return wrapped_.supports_reconnect
+  supports-reconnect -> bool: return wrapped_.supports-reconnect
 
   reconnect -> none:
-    if on_reconnect: on_reconnect.call
+    if on-reconnect: on-reconnect.call
     wrapped_.reconnect
 
   disconnect -> none:
-    if on_disconnect: on_disconnect.call
+    if on-disconnect: on-disconnect.call
     wrapped_.disconnect
 
-  is_closed -> bool: return wrapped_.is_closed
+  is-closed -> bool: return wrapped_.is-closed

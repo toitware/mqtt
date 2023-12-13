@@ -6,13 +6,13 @@ import log
 import mqtt.broker
 import .transport
 
-with_internal_broker --logger/log.Logger [block]:
-  server_transport := TestServerTransport
-  broker := broker.Broker server_transport --logger=logger
-  broker_task := task:: broker.start
+with-internal-broker --logger/log.Logger [block]:
+  server-transport := TestServerTransport
+  broker := broker.Broker server-transport --logger=logger
+  broker-task := task:: broker.start
 
   try:
-    block.call:: TestClientTransport server_transport
+    block.call:: TestClientTransport server-transport
   finally:
-    broker_task.cancel
+    broker-task.cancel
 

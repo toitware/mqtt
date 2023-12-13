@@ -16,17 +16,17 @@ The full client requires more steps but is more flexible.
 HOST ::= "test.mosquitto.org"
 PORT ::= 1883
 
-TOPIC_PREFIX ::= "toit/topic-$(random)"
-CLIENT_ID ::= "toit-client-id-$(random)"
+TOPIC-PREFIX ::= "toit/topic-$(random)"
+CLIENT-ID ::= "toit-client-id-$(random)"
 
 main:
   transport := mqtt.TcpTransport --host=HOST --port=PORT
   client := mqtt.FullClient --transport=transport
 
-  options := mqtt.SessionOptions --client_id=CLIENT_ID
+  options := mqtt.SessionOptions --client-id=CLIENT-ID
   client.connect --options=options
 
-  unsubscribed_latch := monitor.Latch
+  unsubscribed-latch := monitor.Latch
 
   task::
     client.handle: | packet /mqtt.Packet |
@@ -37,11 +37,11 @@ main:
       client.ack packet
       if packet is mqtt.PublishPacket:
         publish := packet as mqtt.PublishPacket
-        print "Incoming: $publish.topic $publish.payload.to_string"
+        print "Incoming: $publish.topic $publish.payload.to-string"
       else if packet is mqtt.SubAckPacket:
         print "Subscribed"
       else if packet is mqtt.UnsubAckPacket:
-        unsubscribed_latch.set true
+        unsubscribed-latch.set true
         print "Unsubscribed"
       else:
         print "Unknown packet of type $packet.type"
@@ -54,12 +54,12 @@ main:
   // client.when_running: null
   // client.subscribe ...
   // ```
-  client.when_running:
-    client.subscribe "$TOPIC_PREFIX/#"
-    client.publish "$TOPIC_PREFIX/foo" "hello_world".to_byte_array
-    client.publish "$TOPIC_PREFIX/bar" "hello_world".to_byte_array --qos=1
-    client.unsubscribe "$TOPIC_PREFIX/#"
+  client.when-running:
+    client.subscribe "$TOPIC-PREFIX/#"
+    client.publish "$TOPIC-PREFIX/foo" "hello_world".to-byte-array
+    client.publish "$TOPIC-PREFIX/bar" "hello_world".to-byte-array --qos=1
+    client.unsubscribe "$TOPIC-PREFIX/#"
 
     // Wait for the confirmation that we have unsubscribed.
-    unsubscribed_latch.get
+    unsubscribed-latch.get
     client.close

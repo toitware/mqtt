@@ -25,52 +25,52 @@ PORT ::= 8883
 // Alternatively, you could install the certificate_roots package
 // and use 'ISRG_ROOT_X1':
 //   `SERVER_CERTIFICATE ::= certificate_roots.ISRG_ROOT_X1`
-SERVER_CERTIFICATE ::= MOSQUITTO_ORG_CERTIFICATE
+SERVER-CERTIFICATE ::= MOSQUITTO-ORG-CERTIFICATE
 
-CLIENT_ID ::= "toit-pubsub-$(random)"
+CLIENT-ID ::= "toit-pubsub-$(random)"
 USERNAME ::= "rw"
 PASSWORD ::= "readwrite"
 
-TOPIC_PREFIX ::= "toit/pubsub-$(random)"
+TOPIC-PREFIX ::= "toit/pubsub-$(random)"
 
 main:
   client := mqtt.Client.tls --host=HOST
-      --root_certificates=[SERVER_CERTIFICATE]
+      --root-certificates=[SERVER-CERTIFICATE]
 
   options := mqtt.SessionOptions
-      --clean_session
-      --client_id=CLIENT_ID
+      --clean-session
+      --client-id=CLIENT-ID
       --username=USERNAME
       --password=PASSWORD
   client.start --options=options
-      --on_error=:: print "Client error: $it"
+      --on-error=:: print "Client error: $it"
 
   print "Connected to broker"
 
-  client.subscribe "$TOPIC_PREFIX/+":: | topic payload |
+  client.subscribe "$TOPIC-PREFIX/+":: | topic payload |
     if payload == #[0]:
       // Received the token to stop listening.
       client.close
     else:
-      print "$topic: $payload.to_string_non_throwing"
+      print "$topic: $payload.to-string-non-throwing"
 
   10.repeat:
     payload := json.encode {
       "key": it
     }
     topic := ?
-    if it % 2 == 0: topic = "$TOPIC_PREFIX/foo"
-    else: topic = "$TOPIC_PREFIX/bar"
+    if it % 2 == 0: topic = "$TOPIC-PREFIX/foo"
+    else: topic = "$TOPIC-PREFIX/bar"
     client.publish topic payload
     sleep --ms=1000
 
   // Send a signal to stop listening for messages.
-  client.publish "$TOPIC_PREFIX/done" #[0]
+  client.publish "$TOPIC-PREFIX/done" #[0]
 
   print "done"
 
 // The certificate given by https://test.mosquitto.org/.
-MOSQUITTO_ORG_CERTIFICATE ::= x509.Certificate.parse """
+MOSQUITTO-ORG-CERTIFICATE ::= x509.Certificate.parse """
 -----BEGIN CERTIFICATE-----
 MIIEAzCCAuugAwIBAgIUBY1hlCGvdj4NhBXkZ/uLUZNILAwwDQYJKoZIhvcNAQEL
 BQAwgZAxCzAJBgNVBAYTAkdCMRcwFQYDVQQIDA5Vbml0ZWQgS2luZ2RvbTEOMAwG
