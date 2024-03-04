@@ -36,7 +36,7 @@ test create-transport/Lambda --logger/log.Logger:
     failing-transport = CallbackTestTransport transport
     failing-transport
 
-  reconnection-strategy := mqtt.DefaultSessionReconnectionStrategy
+  reconnection-strategy := mqtt.RetryReconnectionStrategy
       --logger=logger.with-name "mqtt.reconnection_strategy"
       --attempt-delays=[
         Duration.ZERO,
