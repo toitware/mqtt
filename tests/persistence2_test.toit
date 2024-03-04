@@ -38,7 +38,6 @@ class TestPersistenceStore implements mqtt.PersistenceStore:
   size -> int:
     return packets.size
 
-
 /**
 Tests that the persistence store stores unsent packets, and that a new
   client can reuse that persistence store.
