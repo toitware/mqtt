@@ -6,7 +6,7 @@
 Demonstrates the use of AWS IoT Core.
 */
 
-import certificate_roots
+import certificate-roots
 import mqtt
 import mqtt.transport as mqtt
 import net
@@ -20,7 +20,7 @@ import tls
 HOST ::= "<- insert endpoint URL here ->"
 PORT ::= 8883
 
-CLIENT_CERTIFICATE ::= """
+CLIENT-CERTIFICATE ::= """
 -----BEGIN CERTIFICATE-----
 
 <- insert cert here ->
@@ -28,7 +28,7 @@ CLIENT_CERTIFICATE ::= """
 -----END CERTIFICATE-----
 """
 
-CLIENT_KEY ::= """
+CLIENT-KEY ::= """
 -----BEGIN RSA PRIVATE KEY-----
 
 <- insert cert here ->
@@ -41,40 +41,40 @@ CLIENT_KEY ::= """
 // specific form.
 // See the 'iot:Connect" Policy action. If it ends with ':client/foo/*' then
 // clients must be prefixed with "foo/".
-CLIENT_ID ::= "<- insert client ID here ->"
+CLIENT-ID ::= "<- insert client ID here ->"
 
 // The topic to publish to.
 // See the Policy action 'iot:Publish' to see which topics are allowed.
 // If it ends with ':topic/foo/*' then only topics that are prefixed with
 // "foo/" are allowed.
-MY_TOPIC ::= "<- insert topic here ->"
+MY-TOPIC ::= "<- insert topic here ->"
 
-create_transport -> mqtt.Transport:
-  client_certificate := tls.Certificate (x509.Certificate.parse CLIENT_CERTIFICATE) CLIENT_KEY
+create-transport -> mqtt.Transport:
+  client-certificate := tls.Certificate (x509.Certificate.parse CLIENT-CERTIFICATE) CLIENT-KEY
   return mqtt.TcpTransport.tls --host=HOST --port=PORT
-      --server_name=HOST
-      --root_certificates=[certificate_roots.AMAZON_ROOT_CA_1]
-      --certificate=client_certificate
+      --server-name=HOST
+      --root-certificates=[certificate-roots.AMAZON-ROOT-CA-1]
+      --certificate=client-certificate
 
 main:
-  transport := create_transport
+  transport := create-transport
 
   client := mqtt.Client --transport=transport
 
   options := mqtt.SessionOptions
-      --client_id=CLIENT_ID
-      --clean_session=true
+      --client-id=CLIENT-ID
+      --clean-session=true
 
   client.start --options=options
 
-  topic := MY_TOPIC
+  topic := MY-TOPIC
 
   // Simulate a temperature sensor.
   temperature := 25.0
   10.repeat:
     temperature += ((random 100) - 50) / 100.0
     print "publishing"
-    client.publish topic "$temperature".to_byte_array
+    client.publish topic "$temperature".to-byte-array
     sleep --ms=2_500
 
   client.close

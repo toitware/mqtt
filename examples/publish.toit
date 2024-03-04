@@ -19,18 +19,18 @@ import monitor
 // change the client id, as well as the topic.
 HOST ::= "127.0.0.1"
 
-CLIENT_ID ::= "toit-publish"
+CLIENT-ID ::= "toit-publish"
 TOPIC ::= "toit/example/publish_subscribe"
 
 main:
   client := mqtt.Client --host=HOST
-  client.start --client_id=CLIENT_ID
-      --on_error=:: print "Client error: $it"
+  client.start --client-id=CLIENT-ID
+      --on-error=:: print "Client error: $it"
 
   print "Connected to broker"
 
   4.repeat:
-    client.publish TOPIC "$it".to_byte_array
+    client.publish TOPIC "$it".to-byte-array
     print "Published '$it'"
     sleep --ms=1000
 

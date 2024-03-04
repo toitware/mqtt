@@ -10,28 +10,28 @@ import mqtt.transport as mqtt
 import mqtt.packets as mqtt
 import net
 
-import .broker_internal
-import .broker_mosquitto
+import .broker-internal
+import .broker-mosquitto
 import .transport
 
-SUBSCRIPTION_TESTS ::= [
+SUBSCRIPTION-TESTS ::= [
   "##",
   "#/level2",
   "++/level1/level2/level3",
   "le+vel1/level2/level3",
 ]
 
-PUBLISH_TESTS ::= [
+PUBLISH-TESTS ::= [
   "#",
   "+/foo",
   "",
 ]
 
-test_topic topic/string create_transport/Lambda --mode/string --logger/log.Logger:
-  transport /mqtt.Transport := create_transport.call
+test-topic topic/string create-transport/Lambda --mode/string --logger/log.Logger:
+  transport /mqtt.Transport := create-transport.call
   client := mqtt.FullClient --transport=transport --logger=logger
 
-  options := mqtt.SessionOptions --client_id="test_client"
+  options := mqtt.SessionOptions --client-id="test_client"
   client.connect --options=options
 
   done := monitor.Latch
@@ -45,9 +45,9 @@ test_topic topic/string create_transport/Lambda --mode/string --logger/log.Logge
           publish := packet as mqtt.PublishPacket
           callbacks[publish.topic].call publish
         else:
-          logger.info "ignored $(mqtt.Packet.debug_string_ packet)"
+          logger.info "ignored $(mqtt.Packet.debug-string_ packet)"
       logger.info "client shut down"
-    expect_not_null exception
+    expect-not-null exception
     done.set true
 
   exception := catch:
@@ -68,20 +68,20 @@ test_topic topic/string create_transport/Lambda --mode/string --logger/log.Logge
 /**
 Tests that invalid topics are correctly handled.
 */
-test create_transport/Lambda --logger/log.Logger:
-  SUBSCRIPTION_TESTS.do: | topic |
-    test_topic topic create_transport --logger=logger --mode="subscribe"
-    test_topic topic create_transport --logger=logger --mode="unsubscribe"
-    test_topic topic create_transport --logger=logger --mode="publish"
+test create-transport/Lambda --logger/log.Logger:
+  SUBSCRIPTION-TESTS.do: | topic |
+    test-topic topic create-transport --logger=logger --mode="subscribe"
+    test-topic topic create-transport --logger=logger --mode="unsubscribe"
+    test-topic topic create-transport --logger=logger --mode="publish"
 
-  PUBLISH_TESTS.do: | topic |
-    test_topic topic create_transport --logger=logger --mode="publish"
+  PUBLISH-TESTS.do: | topic |
+    test-topic topic create-transport --logger=logger --mode="publish"
 
 main args:
-  test_with_mosquitto := args.contains "--mosquitto"
-  log_level := log.ERROR_LEVEL
-  logger := log.default.with_level log_level
+  test-with-mosquitto := args.contains "--mosquitto"
+  log-level := log.ERROR-LEVEL
+  logger := log.default.with-level log-level
 
-  run_test := : | create_transport/Lambda | test create_transport --logger=logger
-  if test_with_mosquitto: with_mosquitto --logger=logger run_test
-  else: with_internal_broker --logger=logger run_test
+  run-test := : | create-transport/Lambda | test create-transport --logger=logger
+  if test-with-mosquitto: with-mosquitto --logger=logger run-test
+  else: with-internal-broker --logger=logger run-test

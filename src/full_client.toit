@@ -7,14 +7,14 @@ import log
 import reader
 import writer show Writer
 
-import .session_options
-import .last_will
+import .session-options
+import .last-will
 import .packets
 import .tcp  // For toitdoc.
-import .topic_qos
+import .topic-qos
 import .transport
 
-CLIENT_CLOSED_EXCEPTION ::= "CLIENT_CLOSED"
+CLIENT-CLOSED-EXCEPTION ::= "CLIENT_CLOSED"
 
 /**
 A class that ensures that the connection to the broker is kept alive.
@@ -23,11 +23,11 @@ When necessary sends ping packets to the broker.
 */
 class ActivityChecker_:
   connection_ /Connection_
-  keep_alive_ /Duration
-  current_connection_ /Connection_? := null
+  keep-alive_ /Duration
+  current-connection_ /Connection_? := null
 
-  constructor .connection_ --keep_alive/Duration:
-    keep_alive_ = keep_alive
+  constructor .connection_ --keep-alive/Duration:
+    keep-alive_ = keep-alive
 
   /**
   Checks for activity.
@@ -38,22 +38,22 @@ class ActivityChecker_:
     // TODO(florian): we should be more clever here:
     // We should monitor when the transport starts writing, and when it gets a chunk through.
     // Also, we should monitor that we actually get something from the server.
-    last_write_us := connection_.transport_.last_write_us
-    remaining_keep_alive_us := keep_alive_.in_us - (Time.monotonic_us - last_write_us)
-    if remaining_keep_alive_us > 0:
-      remaining_keep_alive := Duration --us=remaining_keep_alive_us
-      return remaining_keep_alive
-    else if not connection_.is_writing:
+    last-write-us := connection_.transport_.last-write-us
+    remaining-keep-alive-us := keep-alive_.in-us - (Time.monotonic-us - last-write-us)
+    if remaining-keep-alive-us > 0:
+      remaining-keep-alive := Duration --us=remaining-keep-alive-us
+      return remaining-keep-alive
+    else if not connection_.is-writing:
       // TODO(florian): we need to keep track of whether we have sent a ping.
       connection_.write PingReqPacket
-      return keep_alive_ / 2
+      return keep-alive_ / 2
     else:
       // TODO(florian): we are currently sending.
       // We should detect timeouts on the sending.
-      return keep_alive_
+      return keep-alive_
 
   run:
-    while not Task.current.is_canceled and not connection_.is_closed:
+    while not Task.current.is-canceled and not connection_.is-closed:
       catch:
         duration := check
         sleep duration
@@ -64,9 +64,9 @@ A connection to the broker.
 
 Primarily ensures that exceptions are handled correctly.
 The first side (reading or writing) that detects an issue with the transport disconnects the transport.
-  It throws the original exception. The other side simply throws a $CLIENT_CLOSED_EXCEPTION.
+  It throws the original exception. The other side simply throws a $CLIENT-CLOSED-EXCEPTION.
 
-Also sends ping requests to keep the connection alive (if $keep_alive is called).
+Also sends ping requests to keep the connection alive (if $keep-alive is called).
 */
 class Connection_:
   /**
@@ -74,77 +74,77 @@ class Connection_:
   This could be because we haven't tried to establish a connection, but it
     could also be that we are happily running.
   */
-  static STATE_ALIVE_ ::= 0
+  static STATE-ALIVE_ ::= 0
   /**
   The connection is closed or in the process of closing.
   Once connected, if there is an error during receiving or sending, the connection will
     switch to this state and call $Transport.close. This will cause the
     other side (receive or send) to shut down as well (if there is any).
   */
-  static STATE_CLOSED_ ::= 1
+  static STATE-CLOSED_ ::= 1
 
-  state_ / int := STATE_ALIVE_
+  state_ / int := STATE-ALIVE_
 
   transport_ / ActivityMonitoringTransport
   reader_ /reader.BufferedReader
   writer_ /Writer
   writing_ /monitor.Mutex ::= monitor.Mutex
-  is_writing_ /bool := false
+  is-writing_ /bool := false
 
-  closing_reason_ /any := null
+  closing-reason_ /any := null
 
   logger_ /log.Logger
 
-  keep_alive_duration_ /Duration?
+  keep-alive-duration_ /Duration?
   // TODO(florian): the following field should be typed as `Task?`.
   // However, that class is only available in Toit 2.0.
-  activity_task_ /any := null
+  activity-task_ /any := null
 
   /** Constructs a new connection. */
-  constructor .transport_ --keep_alive/Duration? --logger/log.Logger:
+  constructor .transport_ --keep-alive/Duration? --logger/log.Logger:
     reader_ = reader.BufferedReader transport_
     writer_ = Writer transport_
-    keep_alive_duration_ = keep_alive
+    keep-alive-duration_ = keep-alive
     logger_ = logger
 
 
-  is_alive -> bool: return state_ == STATE_ALIVE_
-  is_closed -> bool: return state_ == STATE_CLOSED_
+  is-alive -> bool: return state_ == STATE-ALIVE_
+  is-closed -> bool: return state_ == STATE-CLOSED_
 
   /**
   Starts a task to keep this connection to the broker alive.
   Sends ping requests when necessary.
   */
-  keep_alive --background/bool:
+  keep-alive --background/bool:
     assert: background
-    if activity_task_: throw "ALREADY_RUNNING"
-    if keep_alive_duration_ == Duration.ZERO: return
+    if activity-task_: throw "ALREADY_RUNNING"
+    if keep-alive-duration_ == Duration.ZERO: return
 
-    activity_task_ = task --background::
+    activity-task_ = task --background::
       try:
-        checker := ActivityChecker_ this --keep_alive=keep_alive_duration_
+        checker := ActivityChecker_ this --keep-alive=keep-alive-duration_
         checker.run
       finally:
-        activity_task_ = null
+        activity-task_ = null
 
   /**
   Receives an incoming packet.
   */
   read -> Packet?:
-    if is_closed: throw CLIENT_CLOSED_EXCEPTION
+    if is-closed: throw CLIENT-CLOSED-EXCEPTION
     try:
-      catch --unwind=(: not is_closed):
+      catch --unwind=(: not is-closed):
         return Packet.deserialize reader_
-      if closing_reason_: throw closing_reason_
+      if closing-reason_: throw closing-reason_
       return null
-    finally: | is_exception exception |
-      if is_exception:
+    finally: | is-exception exception |
+      if is-exception:
         close --reason=exception.value
-        state_ = STATE_CLOSED_
+        state_ = STATE-CLOSED_
 
   /** Whether the connection is in the process of writing. */
-  is_writing -> bool:
-    return is_writing_
+  is-writing -> bool:
+    return is-writing_
 
   /**
   Writes the given $packet, serializing it first.
@@ -154,17 +154,17 @@ class Connection_:
     // taking the client's lock. For example, 'ack' messages, the 'disconnect' message, or pings
     // are directly written to the connection (jumping the queue).
     writing_.do:
-      if is_closed: throw CLIENT_CLOSED_EXCEPTION
+      if is-closed: throw CLIENT-CLOSED-EXCEPTION
       try:
-        is_writing_ = true
-        exception := catch --unwind=(: not is_closed):
+        is-writing_ = true
+        exception := catch --unwind=(: not is-closed):
           writer_.write packet.serialize
         if exception:
-          assert: is_closed
-          throw CLIENT_CLOSED_EXCEPTION
-      finally: | is_exception exception |
-        is_writing_ = false
-        if is_exception:
+          assert: is-closed
+          throw CLIENT-CLOSED-EXCEPTION
+      finally: | is-exception exception |
+        is-writing_ = false
+        if is-exception:
           close --reason=exception.value
 
   /**
@@ -174,16 +174,16 @@ class Connection_:
   Closes the underlying transport.
   */
   close --reason=null:
-    if is_closed: return
+    if is-closed: return
     logger_.debug "closing connection" --tags={"reason": reason}
-    assert: closing_reason_ == null
-    critical_do:
-      closing_reason_ = reason
+    assert: closing-reason_ == null
+    critical-do:
+      closing-reason_ = reason
       // By setting the state to closed we quell any error messages from disconnecting the transport.
-      state_ = STATE_CLOSED_
-      if activity_task_:
-        activity_task_.cancel
-        activity_task_ = null
+      state_ = STATE-CLOSED_
+      if activity-task_:
+        activity-task_.cancel
+        activity-task_ = null
       catch: transport_.close
 
 /**
@@ -199,32 +199,32 @@ interface ReconnectionStrategy:
   /**
   Is called when the client wants to establish a connection through the given $transport.
 
-  The strategy should first call $send_connect, followed by a $receive_connect_ack. If
+  The strategy should first call $send-connect, followed by a $receive-connect-ack. If
     the connection is unsuccessful, it may retry.
 
-  The $disconnect_transport may be called before attempting a reconnect. It shuts down the
+  The $disconnect-transport may be called before attempting a reconnect. It shuts down the
     network, thus increasing the chance of a successful reconnect. However, a complete
     network reconnect takes more time. We recommend to try at least once to reconnect without
-    a disconnect first, and then call $disconnect_transport for later attempts.
+    a disconnect first, and then call $disconnect-transport for later attempts.
 
-  The $receive_connect_ack block returns whether the broker had a session for this client.
+  The $receive-connect-ack block returns whether the broker had a session for this client.
 
-  The $is_initial_connection is true if this is the first time the client connects to the broker.
+  The $is-initial-connection is true if this is the first time the client connects to the broker.
   */
   connect -> none
       transport/ActivityMonitoringTransport
-      --is_initial_connection /bool
-      [--reconnect_transport]
-      [--disconnect_transport]
-      [--send_connect]
-      [--receive_connect_ack]
+      --is-initial-connection /bool
+      [--reconnect-transport]
+      [--disconnect-transport]
+      [--send-connect]
+      [--receive-connect-ack]
       [--disconnect]
 
   /** Whether the client should even try to reconnect. */
-  should_try_reconnect transport/ActivityMonitoringTransport -> bool
+  should-try-reconnect transport/ActivityMonitoringTransport -> bool
 
   /** Whether the strategy is closed. */
-  is_closed -> bool
+  is-closed -> bool
 
   /** Closes the strategy, indicating that no further reconnection attempts should be done. */
   close -> none
@@ -233,52 +233,52 @@ interface ReconnectionStrategy:
 A latch that has a timeout when getting its value.
 */
 monitor WaitSignal_:
-  has_triggered_ /bool := false
+  has-triggered_ /bool := false
 
   /**
   Either returns true if the signal is triggered or null if the timeout is reached.
   */
   wait --timeout/Duration -> bool?:
-    try_await --deadline=(Time.monotonic_us + timeout.in_us): has_triggered_
-    if has_triggered_: return true
+    try-await --deadline=(Time.monotonic-us + timeout.in-us): has-triggered_
+    if has-triggered_: return true
     return null
 
   trigger -> none:
-    has_triggered_ = true
+    has-triggered_ = true
 
 /**
 A base class for reconnection strategies.
 */
 abstract class ReconnectionStrategyBase implements ReconnectionStrategy:
-  static DEFAULT_RECEIVE_CONNECT_TIMEOUT /Duration ::= Duration --s=5
-  static DEFAULT_ATTEMPT_DELAYS /List ::= [
+  static DEFAULT-RECEIVE-CONNECT-TIMEOUT /Duration ::= Duration --s=5
+  static DEFAULT-ATTEMPT-DELAYS /List ::= [
     Duration --s=1,
     Duration --s=5,
     Duration --s=15,
   ]
 
-  receive_connect_timeout_ /Duration
-  attempt_delays_ /List?
-  delay_lambda_ /Lambda?
+  receive-connect-timeout_ /Duration
+  attempt-delays_ /List?
+  delay-lambda_ /Lambda?
 
-  is_closed_ := false
+  is-closed_ := false
 
   logger_/log.Logger
 
   /**
   A latch that is set when the client is closed.
   */
-  closed_signal_ /WaitSignal_ := WaitSignal_
+  closed-signal_ /WaitSignal_ := WaitSignal_
 
   constructor
-      --receive_connect_timeout /Duration = DEFAULT_RECEIVE_CONNECT_TIMEOUT
-      --delay_lambda /Lambda? = null
-      --attempt_delays /List? /*Duration*/ = (delay_lambda ? null : DEFAULT_ATTEMPT_DELAYS)
+      --receive-connect-timeout /Duration = DEFAULT-RECEIVE-CONNECT-TIMEOUT
+      --delay-lambda /Lambda? = null
+      --attempt-delays /List? /*Duration*/ = (delay-lambda ? null : DEFAULT-ATTEMPT-DELAYS)
       --logger/log.Logger?=log.default:
-    if delay_lambda and attempt_delays: throw "BOTH_DELAY_LAMBDAS_AND_DELAYS"
-    receive_connect_timeout_ = receive_connect_timeout
-    delay_lambda_ = delay_lambda
-    attempt_delays_ = attempt_delays
+    if delay-lambda and attempt-delays: throw "BOTH_DELAY_LAMBDAS_AND_DELAYS"
+    receive-connect-timeout_ = receive-connect-timeout
+    delay-lambda_ = delay-lambda
+    attempt-delays_ = attempt-delays
     logger_ = logger
 
   /**
@@ -287,90 +287,90 @@ abstract class ReconnectionStrategyBase implements ReconnectionStrategy:
   Returns null if the strategy was closed.
   Returns whether the broker had a session for this client, otherwise.
   */
-  do_connect transport/ActivityMonitoringTransport
-      --reuse_connection/bool=false
-      [--reconnect_transport]
-      [--disconnect_transport]
-      [--send_connect]
-      [--receive_connect_ack]:
-    attempt_counter := -1
+  do-connect transport/ActivityMonitoringTransport
+      --reuse-connection/bool=false
+      [--reconnect-transport]
+      [--disconnect-transport]
+      [--send-connect]
+      [--receive-connect-ack]:
+    attempt-counter := -1
     while true:
-      if is_closed: return null
+      if is-closed: return null
 
-      attempt_counter++
+      attempt-counter++
 
-      is_last_attempt := false
-      if attempt_delays_:
-        is_last_attempt = (attempt_counter == attempt_delays_.size)
+      is-last-attempt := false
+      if attempt-delays_:
+        is-last-attempt = (attempt-counter == attempt-delays_.size)
 
       try:
-        catch --unwind=(: is_closed or is_last_attempt):
+        catch --unwind=(: is-closed or is-last-attempt):
 
-          if attempt_counter == 0:
+          if attempt-counter == 0:
             // In the first iteration we try to connect without delay.
-            if not reuse_connection:
+            if not reuse-connection:
               logger_.debug "Attempting to (re)connect"
-              reconnect_transport.call
+              reconnect-transport.call
           else:
-            sleep_duration/Duration := ?
-            if attempt_delays_:
-              sleep_duration = attempt_delays_[attempt_counter - 1]
+            sleep-duration/Duration := ?
+            if attempt-delays_:
+              sleep-duration = attempt-delays_[attempt-counter - 1]
             else:
-              sleep_duration = delay_lambda_.call attempt_counter
-            disconnect_transport.call
-            closed_signal_.wait --timeout=sleep_duration
-            if is_closed: return null
+              sleep-duration = delay-lambda_.call attempt-counter
+            disconnect-transport.call
+            closed-signal_.wait --timeout=sleep-duration
+            if is-closed: return null
             logger_.debug "Attempting to (re)connect"
-            reconnect_transport.call
+            reconnect-transport.call
 
-          send_connect.call
+          send-connect.call
           logger_.debug "Connected to broker"
-          return with_timeout receive_connect_timeout_:
-            result := receive_connect_ack.call
+          return with-timeout receive-connect-timeout_:
+            result := receive-connect-ack.call
             logger_.debug "Connection established"
             result
-      finally: | is_exception _ |
-        if is_exception:
+      finally: | is-exception _ |
+        if is-exception:
           logger_.debug "(Re)connection attempt failed"
 
     unreachable
 
   abstract connect -> none
       transport/ActivityMonitoringTransport
-      --is_initial_connection /bool
-      [--reconnect_transport]
-      [--disconnect_transport]
-      [--send_connect]
-      [--receive_connect_ack]
+      --is-initial-connection /bool
+      [--reconnect-transport]
+      [--disconnect-transport]
+      [--send-connect]
+      [--receive-connect-ack]
       [--disconnect]
 
-  abstract should_try_reconnect transport/ActivityMonitoringTransport -> bool
+  abstract should-try-reconnect transport/ActivityMonitoringTransport -> bool
 
-  is_closed -> bool:
-    return is_closed_
+  is-closed -> bool:
+    return is-closed_
 
   close -> none:
-    is_closed_ = true
-    closed_signal_.trigger
+    is-closed_ = true
+    closed-signal_.trigger
 
 /**
 Deprecated. Use $ReconnectionStrategyBase instead.
 */
 abstract class DefaultReconnectionStrategyBase extends ReconnectionStrategyBase:
-  /** Deprecated. Use $ReconnectionStrategyBase.DEFAULT_RECEIVE_CONNECT_TIMEOUT instead. */
-  static DEFAULT_RECEIVE_CONNECT_TIMEOUT ::= ReconnectionStrategyBase.DEFAULT_RECEIVE_CONNECT_TIMEOUT
-  /** Deprecated. Use $ReconnectionStrategyBase.DEFAULT_ATTEMPT_DELAYS instead. */
-  static DEFAULT_ATTEMPT_DELAYS ::= ReconnectionStrategyBase.DEFAULT_ATTEMPT_DELAYS
+  /** Deprecated. Use $ReconnectionStrategyBase.DEFAULT-RECEIVE-CONNECT-TIMEOUT instead. */
+  static DEFAULT-RECEIVE-CONNECT-TIMEOUT ::= ReconnectionStrategyBase.DEFAULT-RECEIVE-CONNECT-TIMEOUT
+  /** Deprecated. Use $ReconnectionStrategyBase.DEFAULT-ATTEMPT-DELAYS instead. */
+  static DEFAULT-ATTEMPT-DELAYS ::= ReconnectionStrategyBase.DEFAULT-ATTEMPT-DELAYS
 
   constructor
-      --receive_connect_timeout /Duration = ReconnectionStrategyBase.DEFAULT_RECEIVE_CONNECT_TIMEOUT
-      --delay_lambda /Lambda? = null
-      --attempt_delays /List? /*Duration*/ = (delay_lambda ? null : ReconnectionStrategyBase.DEFAULT_ATTEMPT_DELAYS)
+      --receive-connect-timeout /Duration = ReconnectionStrategyBase.DEFAULT-RECEIVE-CONNECT-TIMEOUT
+      --delay-lambda /Lambda? = null
+      --attempt-delays /List? /*Duration*/ = (delay-lambda ? null : ReconnectionStrategyBase.DEFAULT-ATTEMPT-DELAYS)
       --logger/log.Logger?=log.default:
     super
-        --receive_connect_timeout=receive_connect_timeout
-        --delay_lambda=delay_lambda
-        --attempt_delays=attempt_delays
+        --receive-connect-timeout=receive-connect-timeout
+        --delay-lambda=delay-lambda
+        --attempt-delays=attempt-delays
         --logger=logger
 
 /**
@@ -386,37 +386,37 @@ class NoReconnectionStrategy extends ReconnectionStrategyBase:
 
   See $ReconnectionStrategyBase for the meaning of the parameters.
 
-  The $delay_lambda and $attempt-delays parameters are only used for the initial connection
+  The $delay-lambda and $attempt-delays parameters are only used for the initial connection
     attempt.
   */
   constructor
       --logger/log.Logger=log.default
-      --receive_connect_timeout /Duration = ReconnectionStrategyBase.DEFAULT_RECEIVE_CONNECT_TIMEOUT
-      --delay_lambda /Lambda? = null
-      --attempt_delays /List? /*Duration*/ = null:
+      --receive-connect-timeout /Duration = ReconnectionStrategyBase.DEFAULT-RECEIVE-CONNECT-TIMEOUT
+      --delay-lambda /Lambda? = null
+      --attempt-delays /List? /*Duration*/ = null:
     super --logger=logger
-        --receive_connect_timeout=receive_connect_timeout
-        --delay_lambda=delay_lambda
-        --attempt_delays=attempt_delays
+        --receive-connect-timeout=receive-connect-timeout
+        --delay-lambda=delay-lambda
+        --attempt-delays=attempt-delays
 
   connect -> none
       transport/ActivityMonitoringTransport
-      --is_initial_connection /bool
-      [--reconnect_transport]
-      [--disconnect_transport]
-      [--send_connect]
-      [--receive_connect_ack]
+      --is-initial-connection /bool
+      [--reconnect-transport]
+      [--disconnect-transport]
+      [--send-connect]
+      [--receive-connect-ack]
       [--disconnect]:
     // No reconnect.
-    if not is_initial_connection: throw "NO RECONNECT STRATEGY"
-    session_exists := do_connect transport
-        --reuse_connection = is_initial_connection
-        --reconnect_transport = reconnect_transport
-        --disconnect_transport = disconnect_transport
-        --send_connect = send_connect
-        --receive_connect_ack = receive_connect_ack
+    if not is-initial-connection: throw "NO RECONNECT STRATEGY"
+    session-exists := do-connect transport
+        --reuse-connection = is-initial-connection
+        --reconnect-transport = reconnect-transport
+        --disconnect-transport = disconnect-transport
+        --send-connect = send-connect
+        --receive-connect-ack = receive-connect-ack
 
-  should_try_reconnect transport/ActivityMonitoringTransport -> bool:
+  should-try-reconnect transport/ActivityMonitoringTransport -> bool:
     return false
 
 /**
@@ -432,13 +432,13 @@ Deprecated. Use $NoReconnectionStrategy instead.
 class DefaultCleanSessionReconnectionStrategy extends NoReconnectionStrategy:
   constructor
       --logger/log.Logger=log.default
-      --receive_connect_timeout /Duration = ReconnectionStrategyBase.DEFAULT_RECEIVE_CONNECT_TIMEOUT
-      --delay_lambda /Lambda? = null
-      --attempt_delays /List? /*Duration*/ = null:
+      --receive-connect-timeout /Duration = ReconnectionStrategyBase.DEFAULT-RECEIVE-CONNECT-TIMEOUT
+      --delay-lambda /Lambda? = null
+      --attempt-delays /List? /*Duration*/ = null:
     super --logger=logger
-        --receive_connect_timeout=receive_connect_timeout
-        --delay_lambda=delay_lambda
-        --attempt_delays=attempt_delays
+        --receive-connect-timeout=receive-connect-timeout
+        --delay-lambda=delay-lambda
+        --attempt-delays=attempt-delays
 
 /**
 The reconnection strategy that tries to reconnect when the connection is
@@ -454,38 +454,38 @@ class RetryReconnectionStrategy extends ReconnectionStrategyBase:
   */
   constructor
       --logger/log.Logger=log.default
-      --receive_connect_timeout /Duration = ReconnectionStrategyBase.DEFAULT_RECEIVE_CONNECT_TIMEOUT
-      --delay_lambda /Lambda? = null
-      --attempt_delays /List? = null:
+      --receive-connect-timeout /Duration = ReconnectionStrategyBase.DEFAULT-RECEIVE-CONNECT-TIMEOUT
+      --delay-lambda /Lambda? = null
+      --attempt-delays /List? = null:
     super --logger=logger
-        --receive_connect_timeout=receive_connect_timeout
-        --delay_lambda=delay_lambda
-        --attempt_delays=attempt_delays
+        --receive-connect-timeout=receive-connect-timeout
+        --delay-lambda=delay-lambda
+        --attempt-delays=attempt-delays
 
   connect -> none
       transport/ActivityMonitoringTransport
-      --is_initial_connection /bool
-      [--reconnect_transport]
-      [--disconnect_transport]
-      [--send_connect]
-      [--receive_connect_ack]
+      --is-initial-connection /bool
+      [--reconnect-transport]
+      [--disconnect-transport]
+      [--send-connect]
+      [--receive-connect-ack]
       [--disconnect]:
-    session_exists := do_connect transport
-        --reuse_connection = is_initial_connection
-        --reconnect_transport = reconnect_transport
-        --disconnect_transport = disconnect_transport
-        --send_connect = send_connect
-        --receive_connect_ack = receive_connect_ack
+    session-exists := do-connect transport
+        --reuse-connection = is-initial-connection
+        --reconnect-transport = reconnect-transport
+        --disconnect-transport = disconnect-transport
+        --send-connect = send-connect
+        --receive-connect-ack = receive-connect-ack
 
-    if is_initial_connection or session_exists: return
+    if is-initial-connection or session-exists: return
 
     // The session was reset.
     // Disconnect and throw. If the user wants to, they should create a new client.
     catch: disconnect.call
     throw "SESSION_EXPIRED"
 
-  should_try_reconnect transport/ActivityMonitoringTransport -> bool:
-    return transport.supports_reconnect
+  should-try-reconnect transport/ActivityMonitoringTransport -> bool:
+    return transport.supports-reconnect
 
 /**
 Deprecated. Use $RetryReconnectionStrategy instead.
@@ -493,13 +493,13 @@ Deprecated. Use $RetryReconnectionStrategy instead.
 class DefaultSessionReconnectionStrategy extends RetryReconnectionStrategy:
   constructor
       --logger/log.Logger=log.default
-      --receive_connect_timeout /Duration = ReconnectionStrategyBase.DEFAULT_RECEIVE_CONNECT_TIMEOUT
-      --delay_lambda /Lambda? = null
-      --attempt_delays /List? = null:
+      --receive-connect-timeout /Duration = ReconnectionStrategyBase.DEFAULT-RECEIVE-CONNECT-TIMEOUT
+      --delay-lambda /Lambda? = null
+      --attempt-delays /List? = null:
     super --logger=logger
-        --receive_connect_timeout=receive_connect_timeout
-        --delay_lambda=delay_lambda
-        --attempt_delays=attempt_delays
+        --receive-connect-timeout=receive-connect-timeout
+        --delay-lambda=delay-lambda
+        --attempt-delays=attempt-delays
 
 /**
 A reconnection strategy that keeps reconnecting.
@@ -528,43 +528,43 @@ class TenaciousReconnectionStrategy extends ReconnectionStrategyBase:
   /**
   Creates a new tenacious reconnection strategy.
 
-  The given $delay_lambda must return a Duration, representing the delay between
+  The given $delay-lambda must return a Duration, representing the delay between
     the next connection attempt. The first reconnection attempt is always
     immediate, so this lambda is only called before the second and subsequent
     attempts.
 
-  The $receive_connect_timeout is the timeout given for the CONNECT packet to
+  The $receive-connect-timeout is the timeout given for the CONNECT packet to
     arrive at the client.
   */
   constructor
       --logger/log.Logger=log.default
-      --receive_connect_timeout /Duration = ReconnectionStrategyBase.DEFAULT_RECEIVE_CONNECT_TIMEOUT
-      --delay_lambda /Lambda:
+      --receive-connect-timeout /Duration = ReconnectionStrategyBase.DEFAULT-RECEIVE-CONNECT-TIMEOUT
+      --delay-lambda /Lambda:
     super --logger=logger
-        --receive_connect_timeout=receive_connect_timeout
-        --delay_lambda=delay_lambda
+        --receive-connect-timeout=receive-connect-timeout
+        --delay-lambda=delay-lambda
 
   connect -> none
       transport/ActivityMonitoringTransport
-      --is_initial_connection /bool
-      [--reconnect_transport]
-      [--disconnect_transport]
-      [--send_connect]
-      [--receive_connect_ack]
+      --is-initial-connection /bool
+      [--reconnect-transport]
+      [--disconnect-transport]
+      [--send-connect]
+      [--receive-connect-ack]
       [--disconnect]:
-    session_exists := do_connect transport
-        --reuse_connection = is_initial_connection
-        --reconnect_transport = reconnect_transport
-        --disconnect_transport = disconnect_transport
-        --send_connect = send_connect
-        --receive_connect_ack = receive_connect_ack
+    session-exists := do-connect transport
+        --reuse-connection = is-initial-connection
+        --reconnect-transport = reconnect-transport
+        --disconnect-transport = disconnect-transport
+        --send-connect = send-connect
+        --receive-connect-ack = receive-connect-ack
 
     // We don't care if the session exists or not.
     // This strategy just wants to reconnect.
     return
 
-  should_try_reconnect transport/ActivityMonitoringTransport -> bool:
-    return transport.supports_reconnect
+  should-try-reconnect transport/ActivityMonitoringTransport -> bool:
+    return transport.supports-reconnect
 
 /**
 An MQTT session.
@@ -573,7 +573,7 @@ Keeps track of data that must survive disconnects (assuming the user didn't use
   the 'clean_session' flag).
 */
 class Session_:
-  next_packet_id_ /int? := 1
+  next-packet-id_ /int? := 1
 
   /**
   The persistence store used by this session.
@@ -586,11 +586,11 @@ class Session_:
 
   Use $PersistenceStore.do to iterate over the stored messages.
   */
-  persistence_store_ /PersistenceStore
+  persistence-store_ /PersistenceStore
 
   options /SessionOptions
 
-  static NOT_ACKED_ ::= 0
+  static NOT-ACKED_ ::= 0
   static ACKED_ ::= 1
 
   /**
@@ -598,12 +598,12 @@ class Session_:
     but are in the process of being sent to the broker.
   Once the sending is done without an exception, the id is removed from this
     set and given to the persistence store.
-  Depending on whether it was $ACKED_ or $NOT_ACKED_, the packet is then
+  Depending on whether it was $ACKED_ or $NOT-ACKED_, the packet is then
     immediately removed from the store again.
   */
-  ack_ids_to_hold_/Map ::= {:}
+  ack-ids-to-hold_/Map ::= {:}
 
-  constructor .options .persistence_store_:
+  constructor .options .persistence-store_:
 
   /**
   Marks the given packet $id as being in the process of being sent to the broker.
@@ -611,43 +611,43 @@ class Session_:
   The session holds the acks and doesn't immediately give it to the
     persistence store.
   */
-  hold_ack_for id/int -> none:
-    ack_ids_to_hold_[id] = NOT_ACKED_
+  hold-ack-for id/int -> none:
+    ack-ids-to-hold_[id] = NOT-ACKED_
 
   /**
   Restores normal ack handling for the given packet $id.
   */
-  restore_ack_handling_for id/int -> none:
-    ack_ids_to_hold_.remove id
+  restore-ack-handling-for id/int -> none:
+    ack-ids-to-hold_.remove id
 
-  set_pending_ack topic/string payload/ByteArray --packet_id/int --retain/bool:
-    persistent := PersistedPacket topic payload --retain=retain --packet_id=packet_id
-    persistence_store_.add persistent
-    ack_ids_to_hold_.get packet_id --if_present=: | current_value |
-      if current_value == ACKED_:
+  set-pending-ack topic/string payload/ByteArray --packet-id/int --retain/bool:
+    persistent := PersistedPacket topic payload --retain=retain --packet-id=packet-id
+    persistence-store_.add persistent
+    ack-ids-to-hold_.get packet-id --if-present=: | current-value |
+      if current-value == ACKED_:
         // This packet was already acked.
         // Inform the persistence store.
-        remove_pending packet_id
+        remove-pending packet-id
       // Either way, stop treating acks for this id specially.
-      restore_ack_handling_for packet_id
+      restore-ack-handling-for packet-id
 
-  handle_ack id/int [--if_absent] -> none:
-    if ack_ids_to_hold_.contains id:
-      ack_ids_to_hold_[id] = ACKED_
+  handle-ack id/int [--if-absent] -> none:
+    if ack-ids-to-hold_.contains id:
+      ack-ids-to-hold_[id] = ACKED_
       return
 
-    if not persistence_store_.remove_persisted_with_id id:
-      if_absent.call id
+    if not persistence-store_.remove-persisted-with-id id:
+      if-absent.call id
 
-  remove_pending id/int -> none:
-    persistence_store_.remove_persisted_with_id id
+  remove-pending id/int -> none:
+    persistence-store_.remove-persisted-with-id id
 
-  next_packet_id -> int:
+  next-packet-id -> int:
     while true:
-      candidate := next_packet_id_
-      next_packet_id_ = (candidate + 1) & ((1 << PublishPacket.ID_BIT_SIZE) - 1)
+      candidate := next-packet-id_
+      next-packet-id_ = (candidate + 1) & ((1 << PublishPacket.ID-BIT-SIZE) - 1)
       // If we are waiting for an ACK of the candidate id, pick a different one.
-      if persistence_store_.get candidate: continue
+      if persistence-store_.get candidate: continue
       return candidate
 
   /**
@@ -658,10 +658,10 @@ class Session_:
   Calls the $block with the packet_id and persisted_id of each pending packet.
   */
   do --pending/bool [block] -> none:
-    persistence_store_.do block
+    persistence-store_.do block
 
-  pending_count -> int:
-    return persistence_store_.size
+  pending-count -> int:
+    return persistence-store_.size
 
 /**
 A persistence strategy for the MQTT client.
@@ -678,7 +678,7 @@ interface PersistenceStore:
   add packet/PersistedPacket -> none
 
   /**
-  Finds the persistent packet with $packet_id and returns it.
+  Finds the persistent packet with $packet-id and returns it.
 
   If no such packet exists, returns null.
 
@@ -686,15 +686,15 @@ interface PersistenceStore:
   The MQTT protocol does not explicitly allow to drop packets. However,
     most brokers should do fine with it.
   */
-  get packet_id/int -> PersistedPacket?
+  get packet-id/int -> PersistedPacket?
 
   /**
-  Removes the data for the packet with $packet_id.
-  Does nothing if there is no data associated to $packet_id.
+  Removes the data for the packet with $packet-id.
+  Does nothing if there is no data associated to $packet-id.
 
   Returns whether the store contained the id.
   */
-  remove_persisted_with_id packet_id/int -> bool
+  remove-persisted-with-id packet-id/int -> bool
 
   /**
   Calls the given block for each stored packet.
@@ -715,12 +715,12 @@ interface PersistenceStore:
   size -> int
 
 class PersistedPacket:
-  packet_id /int
+  packet-id /int
   topic /string
   payload /ByteArray
   retain /bool
 
-  constructor .topic .payload --.packet_id --.retain:
+  constructor .topic .payload --.packet-id --.retain:
 
 /**
 A persistence store that stores the packets in memory.
@@ -732,14 +732,14 @@ class MemoryPersistenceStore implements PersistenceStore:
   storage_ /Map := {:}
 
   add packet/PersistedPacket -> none:
-    id := packet.packet_id
+    id := packet.packet-id
     storage_[id] = packet
 
-  get packet_id/int -> PersistedPacket?:
-    return storage_.get packet_id
+  get packet-id/int -> PersistedPacket?:
+    return storage_.get packet-id
 
-  remove_persisted_with_id packet_id/int -> bool:
-    storage_.remove packet_id --if_absent=: return false
+  remove-persisted-with-id packet-id/int -> bool:
+    storage_.remove packet-id --if-absent=: return false
     return true
 
   /**
@@ -750,8 +750,8 @@ class MemoryPersistenceStore implements PersistenceStore:
     storage_.do --values block
 
   /** Whether no packet is persisted. */
-  is_empty -> bool:
-    return storage_.is_empty
+  is-empty -> bool:
+    return storage_.is-empty
 
   /**
   The count of persisted packets.
@@ -771,42 +771,42 @@ When the connection to the broker is established with the clean-session bit, the
 */
 class FullClient:
   /** The client has been created. Handle has not been called yet. */
-  static STATE_CREATED_ ::= 0
+  static STATE-CREATED_ ::= 0
   /**
   The client is in the process of connecting.
   */
-  static STATE_CONNECTING_ ::= 1
+  static STATE-CONNECTING_ ::= 1
   /**
   The client is (or was) connected.
   This is a necesarry precondition for calling $handle.
   */
-  static STATE_CONNECTED_ ::= 2
+  static STATE-CONNECTED_ ::= 2
   /** The client is handling incoming packets. */
-  static STATE_HANDLING_ ::= 3
+  static STATE-HANDLING_ ::= 3
   /**
   The client has disconnected.
   The packet might not be sent yet (if other packets are queued in front), but no
     calls to $publish, ... should be done.
   */
-  static STATE_DISCONNECTED_ ::= 4
+  static STATE-DISCONNECTED_ ::= 4
   /**
   The client is disconnected and in the process of shutting down.
   This only happens once the current message has been handled. That is, once
     the $handle method's block has returned.
   Externally, the client class considers this to be equivalent to being closed. The
-    $is_closed method returns true when the $state_ is set to $STATE_CLOSING_.
+    $is-closed method returns true when the $state_ is set to $STATE-CLOSING_.
   */
-  static STATE_CLOSING_ ::= 5
+  static STATE-CLOSING_ ::= 5
   /** The client is closed. */
-  static STATE_CLOSED_ ::= 6
+  static STATE-CLOSED_ ::= 6
 
-  state_ /int := STATE_CREATED_
+  state_ /int := STATE-CREATED_
 
   transport_ /ActivityMonitoringTransport := ?
   logger_ /log.Logger
 
   session_ /Session_? := null
-  reconnection_strategy_ /ReconnectionStrategy? := null
+  reconnection-strategy_ /ReconnectionStrategy? := null
 
   connection_ /Connection_? := null
   connecting_ /monitor.Mutex := monitor.Mutex
@@ -817,7 +817,7 @@ class FullClient:
 
   Note that we allow to read the latch multiple times.
   */
-  handling_latch_ /monitor.Latch := monitor.Latch
+  handling-latch_ /monitor.Latch := monitor.Latch
 
   /**
   A mutex to queue the senders.
@@ -833,12 +833,12 @@ class FullClient:
   If the packet was not acked during the callback of $handle we will do so automatically
     when the callback returns.
   */
-  unacked_packet_ /Packet? := null
+  unacked-packet_ /Packet? := null
 
   /**
   A signal that is triggered whenever a packet acknowledgement is received.
   */
-  ack_received_signal_ /monitor.Signal := monitor.Signal
+  ack-received-signal_ /monitor.Signal := monitor.Signal
 
   /**
   Constructs an MQTT client.
@@ -857,10 +857,10 @@ class FullClient:
 
   The client must have connected, and run the $handle loop.
   */
-  check_allowed_to_send_:
-    if is_closed: throw CLIENT_CLOSED_EXCEPTION
+  check-allowed-to-send_:
+    if is-closed: throw CLIENT-CLOSED-EXCEPTION
     // The client is only active once $handle has been called.
-    if not is_running: throw "INVALID_STATE"
+    if not is-running: throw "INVALID_STATE"
 
   /**
   Connects the client to the broker.
@@ -870,25 +870,25 @@ class FullClient:
   */
   connect -> none
       --options /SessionOptions
-      --persistence_store /PersistenceStore = MemoryPersistenceStore
-      --reconnection_strategy /ReconnectionStrategy? = null:
-    if state_ != STATE_CREATED_: throw "INVALID_STATE"
+      --persistence-store /PersistenceStore = MemoryPersistenceStore
+      --reconnection-strategy /ReconnectionStrategy? = null:
+    if state_ != STATE-CREATED_: throw "INVALID_STATE"
     assert: not connection_
 
-    if reconnection_strategy:
-      reconnection_strategy_ = reconnection_strategy
-    else if options.clean_session:
-      reconnection_strategy_ = NoReconnectionStrategy
-          --logger=logger_.with_name "reconnect"
+    if reconnection-strategy:
+      reconnection-strategy_ = reconnection-strategy
+    else if options.clean-session:
+      reconnection-strategy_ = NoReconnectionStrategy
+          --logger=logger_.with-name "reconnect"
     else:
-      reconnection_strategy_ = RetryReconnectionStrategy
-          --logger=logger_.with_name "reconnect"
+      reconnection-strategy_ = RetryReconnectionStrategy
+          --logger=logger_.with-name "reconnect"
 
-    session_ = Session_ options persistence_store
+    session_ = Session_ options persistence-store
 
-    state_ = STATE_CONNECTING_
-    reconnect_ --is_initial_connection
-    state_ = STATE_CONNECTED_
+    state_ = STATE-CONNECTING_
+    reconnect_ --is-initial-connection
+    state_ = STATE-CONNECTED_
 
   /**
   Runs the receiving end of the client.
@@ -896,21 +896,21 @@ class FullClient:
   The client is not considered started until this method has been called.
   This method is blocking.
 
-  The given $on_packet block is called for each received packet.
+  The given $on-packet block is called for each received packet.
     The block should $ack the packet as soon as possible.
 
-  The $when_running method executes a given block when this method is running.
+  The $when-running method executes a given block when this method is running.
   */
-  handle [on_packet] -> none:
-    if state_ != STATE_CONNECTED_: throw "INVALID_STATE"
-    state_ = STATE_HANDLING_
+  handle [on-packet] -> none:
+    if state_ != STATE-CONNECTED_: throw "INVALID_STATE"
+    state_ = STATE-HANDLING_
 
     try:
-      handling_latch_.set true
-      while not Task.current.is_canceled:
+      handling-latch_.set true
+      while not Task.current.is-canceled:
         packet /Packet? := null
-        catch --unwind=(: not state_ == STATE_DISCONNECTED_ and not state_ == STATE_CLOSING_):
-          do_connected_ --allow_disconnected: packet = connection_.read
+        catch --unwind=(: not state_ == STATE-DISCONNECTED_ and not state_ == STATE-CLOSING_):
+          do-connected_ --allow-disconnected: packet = connection_.read
 
         if not packet:
           // Normally the broker should only close the connection when we have
@@ -918,7 +918,7 @@ class FullClient:
           // In theory this could hide unexpected disconnects from the server, but it's
           // much more likely that we first disconnected, and then called $close for
           // another reason (like timeout).
-          if not is_closed:
+          if not is-closed:
             logger_.info "disconnect from server"
             // Reset the connection and try again.
             // The loop will call `do_connected_` which will ensure that we reconnect if
@@ -931,39 +931,39 @@ class FullClient:
           break
 
         if packet is PublishPacket or packet is SubAckPacket or packet is UnsubAckPacket:
-          unacked_packet_ = packet
+          unacked-packet_ = packet
           try:
-            on_packet.call packet
-            packet.ensure_drained_
-            if is_running and unacked_packet_: ack unacked_packet_
+            on-packet.call packet
+            packet.ensure-drained_
+            if is-running and unacked-packet_: ack unacked-packet_
           finally:
-            unacked_packet_ = null
+            unacked-packet_ = null
         else if packet is ConnAckPacket:
           logger_.info "spurious conn-ack packet"
         else if packet is PingRespPacket:
           // Ignore.
         else if packet is PubAckPacket:
           ack := packet as PubAckPacket
-          id := ack.packet_id
+          id := ack.packet-id
           // The persistence store is allowed to toss out packets it doesn't want to
           // send again. If we receive an unmatched packet id, it might be from an
           // earlier attempt to send it.
-          session_.handle_ack id
-              --if_absent=: logger_.info "unmatched packet id: $id"
-          ack_received_signal_.raise
+          session_.handle-ack id
+              --if-absent=: logger_.info "unmatched packet id: $id"
+          ack-received-signal_.raise
         else:
           logger_.info "unexpected packet of type $packet.type"
     finally:
-      tear_down_
+      tear-down_
 
   /**
   Calls the given $block when the client is running.
   If the client was not able to connect, then the block is not called.
   */
-  when_running [block] -> none:
-    if is_closed: return
-    is_running := handling_latch_.get
-    if not is_running: return
+  when-running [block] -> none:
+    if is-closed: return
+    is-running := handling-latch_.get
+    if not is-running: return
     block.call
 
   /**
@@ -994,53 +994,53 @@ class FullClient:
     returning from $handle, at which point the client is considered fully closed.
   */
   close --force/bool=false -> none:
-    if state_ == STATE_CLOSED_ or state_ == STATE_CLOSING_: return
+    if state_ == STATE-CLOSED_ or state_ == STATE-CLOSING_: return
 
     // If the $handle method hasn't been called, just tear down the client.
-    if state_ == STATE_CREATED_ or state_ == STATE_CONNECTING_ or state_ == STATE_CONNECTED_:
-      tear_down_
+    if state_ == STATE-CREATED_ or state_ == STATE-CONNECTING_ or state_ == STATE-CONNECTED_:
+      tear-down_
       return
 
     if not force: disconnect_
-    else: close_force_
+    else: close-force_
 
   disconnect_ -> none:
-    if state_ == STATE_DISCONNECTED_: return
+    if state_ == STATE-DISCONNECTED_: return
 
-    state_ = STATE_DISCONNECTED_
+    state_ = STATE-DISCONNECTED_
 
     // We might be calling close from within the reconnection-strategy's callback.
     // If the connection is currently not alive simply force-close.
-    if not connection_.is_alive:
-      close_force_
+    if not connection_.is-alive:
+      close-force_
       return
 
-    reconnection_strategy_.close
+    reconnection-strategy_.close
 
     sending_.do:
-      if state_ == STATE_CLOSING_ or state_ == STATE_CLOSED_ : return
+      if state_ == STATE-CLOSING_ or state_ == STATE-CLOSED_ : return
 
       // Make sure we take the same lock as the reconnecting function.
       // Otherwise we might not send a disconnect, even though we just reconnected (or are
       // reconnecting).
       connecting_.do:
-        if connection_.is_alive:
+        if connection_.is-alive:
           connection_.write DisconnectPacket
         else:
-          close_force_
+          close-force_
 
   /**
   Forcefully closes the client.
   */
-  close_force_ -> none:
-    assert: state_ == STATE_HANDLING_ or state_ == STATE_DISCONNECTED_
+  close-force_ -> none:
+    assert: state_ == STATE-HANDLING_ or state_ == STATE-DISCONNECTED_
     // Since we are in a handling/disconnected state, there must have been a $connect call, and as such
     // a reconnection_strategy
     assert: session_
 
-    state_ = STATE_CLOSING_
+    state_ = STATE-CLOSING_
 
-    reconnection_strategy_.close
+    reconnection-strategy_.close
 
     // Shut down the connection, which will lead to the $handle method returning
     //   which will then tear down the client.
@@ -1052,16 +1052,16 @@ class FullClient:
   After a call to disconnect, or a call to $close, the client starts to shut down.
   However, it is only considered to be fully closed when the $handle method returns.
   */
-  is_closed -> bool:
-    return state_ == STATE_DISCONNECTED_ or state_ == STATE_CLOSING_ or state_ == STATE_CLOSED_
+  is-closed -> bool:
+    return state_ == STATE-DISCONNECTED_ or state_ == STATE-CLOSING_ or state_ == STATE-CLOSED_
 
   /**
   Whether the client is connected and running.
 
   If true, users are allowed to send messages or change subscriptions.
   */
-  is_running -> bool:
-    return state_ == STATE_HANDLING_
+  is-running -> bool:
+    return state_ == STATE-HANDLING_
 
   /**
   Publishes an MQTT message on $topic.
@@ -1082,28 +1082,28 @@ class FullClient:
   publish topic/string payload/ByteArray --qos/int=1 --retain/bool=false -> none:
     if topic == "" or topic.contains "+" or topic.contains "#": throw "INVALID_ARGUMENT"
     if qos == 0:
-      send_publish_ topic payload --packet_id=null --qos=qos --retain=retain
+      send-publish_ topic payload --packet-id=null --qos=qos --retain=retain
     else if  qos == 1:
-      ack_received_signal_.wait: session_.pending_count < session_.options.max_inflight
-      packet_id := session_.next_packet_id
+      ack-received-signal_.wait: session_.pending-count < session_.options.max-inflight
+      packet-id := session_.next-packet-id
       // We need to tell the session_ to keep acks for this packet id before we
       // call 'set_pending_ack'. Otherwise we have a race condition where the
       // broker can send the ack before the session is ready for it.
-      session_.hold_ack_for packet_id
+      session_.hold-ack-for packet-id
       try:
-        send_publish_ topic payload --packet_id=packet_id --qos=qos --retain=retain
-        session_.set_pending_ack topic payload --packet_id=packet_id --retain=retain
+        send-publish_ topic payload --packet-id=packet-id --qos=qos --retain=retain
+        session_.set-pending-ack topic payload --packet-id=packet-id --retain=retain
       finally:
         // Either 'set_pending_ack' was called, or we had an exception.
         // Either way we don't need to do special ack-handling for this packet id anymore.
-        session_.restore_ack_handling_for packet_id
+        session_.restore-ack-handling-for packet-id
 
   /**
   Sends a $PublishPacket with the given $topic, $payload, $qos and $retain.
 
   If $qos is 1, then allocates a packet id and returns it.
   */
-  send_publish_ topic/string payload/ByteArray --packet_id --qos/int --retain/bool -> none:
+  send-publish_ topic/string payload/ByteArray --packet-id --qos/int --retain/bool -> none:
     if qos != 0 and qos != 1: throw "INVALID_ARGUMENT"
 
     packet := PublishPacket
@@ -1111,32 +1111,32 @@ class FullClient:
         payload
         --qos=qos
         --retain=retain
-        --packet_id=packet_id
+        --packet-id=packet-id
 
     send_ packet
 
   /**
-  Subscribes to the given $topic with a max qos of $max_qos.
+  Subscribes to the given $topic with a max qos of $max-qos.
 
   The $topic might have wildcards and is thus more of a filter than a single topic.
 
   Returns the packet id of the subscribe packet.
   */
-  subscribe topic/string --max_qos/int=1 -> int:
-    return subscribe_all [ TopicQos topic --max_qos=max_qos ]
+  subscribe topic/string --max-qos/int=1 -> int:
+    return subscribe-all [ TopicQos topic --max-qos=max-qos ]
 
   /**
   Subscribes to the given list $topics of type $TopicQos.
 
   Returns the packet id of the subscribe packet or -1 if the $topics is empty.
   */
-  subscribe_all topics/List -> int:
-    if topics.is_empty: return -1
+  subscribe-all topics/List -> int:
+    if topics.is-empty: return -1
 
-    packet_id := session_.next_packet_id
-    packet := SubscribePacket topics --packet_id=packet_id
+    packet-id := session_.next-packet-id
+    packet := SubscribePacket topics --packet-id=packet-id
     send_ packet
-    return packet_id
+    return packet-id
 
   /**
   Unsubscribes from a single $topic.
@@ -1146,7 +1146,7 @@ class FullClient:
   Returns the packet id of the unsubscribe packet.
   */
   unsubscribe topic/string -> int:
-    return unsubscribe_all [topic]
+    return unsubscribe-all [topic]
 
   /**
   Unsubscribes from the list of $topics (of type $string).
@@ -1156,13 +1156,13 @@ class FullClient:
 
   Returns the packet id of the unsubscribe packet or -1 if the $topics is empty.
   */
-  unsubscribe_all topics/List -> int:
-    if topics.is_empty: return -1
+  unsubscribe-all topics/List -> int:
+    if topics.is-empty: return -1
 
-    packet_id := session_.next_packet_id
-    packet := UnsubscribePacket topics --packet_id=packet_id
+    packet-id := session_.next-packet-id
+    packet := UnsubscribePacket topics --packet-id=packet-id
     send_ packet
-    return packet_id
+    return packet-id
 
   /**
   Acknowledges the hand-over of the packet.
@@ -1172,19 +1172,19 @@ class FullClient:
   If the client is closed, does nothing.
   */
   ack packet/Packet:
-    if unacked_packet_ == packet: unacked_packet_ = null
+    if unacked-packet_ == packet: unacked-packet_ = null
 
-    if is_closed: return
-    if state_ != STATE_HANDLING_: throw "INVALID_STATE"
+    if is-closed: return
+    if state_ != STATE-HANDLING_: throw "INVALID_STATE"
 
     if packet is PublishPacket:
-      id := (packet as PublishPacket).packet_id
+      id := (packet as PublishPacket).packet-id
       if id:
-        check_allowed_to_send_
-        ack := PubAckPacket --packet_id=id
+        check-allowed-to-send_
+        ack := PubAckPacket --packet-id=id
         // Skip the 'sending_' queue and write directly to the connection.
         // This way ack-packets are transmitted faster.
-        do_connected_: connection_.write ack
+        do-connected_: connection_.write ack
 
   /**
   Sends the given $packet.
@@ -1193,131 +1193,131 @@ class FullClient:
   */
   send_ packet/Packet -> none:
     if packet is ConnectPacket: throw "INVALID_PACKET"
-    check_allowed_to_send_
+    check-allowed-to-send_
     sending_.do:
       // While waiting in the queue the client could have been closed.
-      if is_closed: throw CLIENT_CLOSED_EXCEPTION
-      do_connected_: connection_.write packet
+      if is-closed: throw CLIENT-CLOSED-EXCEPTION
+      do-connected_: connection_.write packet
 
   /**
   Runs the given $block in a connected state.
 
   If necessary reconnects the client.
 
-  If $allow_disconnected is true, then the client may also be in a disconnected (but
+  If $allow-disconnected is true, then the client may also be in a disconnected (but
     not closed) state.
   */
-  do_connected_ --allow_disconnected/bool=false [block]:
-    if is_closed and not (allow_disconnected and state_ == STATE_DISCONNECTED_): throw CLIENT_CLOSED_EXCEPTION
-    while not Task.current.is_canceled:
+  do-connected_ --allow-disconnected/bool=false [block]:
+    if is-closed and not (allow-disconnected and state_ == STATE-DISCONNECTED_): throw CLIENT-CLOSED-EXCEPTION
+    while not Task.current.is-canceled:
       // If the connection is still alive, or if the manager doesn't want us to reconnect, let the
       // exception go through.
-      should_abandon := :
-        connection_.is_alive or reconnection_strategy_.is_closed or
-          not reconnection_strategy_.should_try_reconnect transport_
+      should-abandon := :
+        connection_.is-alive or reconnection-strategy_.is-closed or
+          not reconnection-strategy_.should-try-reconnect transport_
 
-      exception := catch --unwind=should_abandon:
+      exception := catch --unwind=should-abandon:
         block.call
         return
       assert: exception != null
-      if is_closed: throw CLIENT_CLOSED_EXCEPTION
-      reconnect_ --is_initial_connection=false
+      if is-closed: throw CLIENT-CLOSED-EXCEPTION
+      reconnect_ --is-initial-connection=false
       // While trying to reconnect there might have been a 'close' call.
       // Since we managed to connect, the 'close' call was too late to intervene with
       // the connection attempt. As such we consider the reconnection a success (as if
       // it happened before the 'close' call), and we continue.
       // There will be a 'disconnect' packet that will close the connection to the broker.
 
-  refused_reason_for_return_code_ return_code/int -> string:
-    refused_reason := "CONNECTION_REFUSED"
-    if return_code == ConnAckPacket.UNACCEPTABLE_PROTOCOL_VERSION:
-      refused_reason = "UNACCEPTABLE_PROTOCOL_VERSION"
-    else if return_code == ConnAckPacket.IDENTIFIER_REJECTED:
-      refused_reason = "IDENTIFIER_REJECTED"
-    else if return_code == ConnAckPacket.SERVER_UNAVAILABLE:
-      refused_reason = "SERVER_UNAVAILABLE"
-    else if return_code == ConnAckPacket.BAD_USERNAME_OR_PASSWORD:
-      refused_reason = "BAD_USERNAME_OR_PASSWORD"
-    else if return_code == ConnAckPacket.NOT_AUTHORIZED:
-      refused_reason = "NOT_AUTHORIZED"
-    return refused_reason
+  refused-reason-for-return-code_ return-code/int -> string:
+    refused-reason := "CONNECTION_REFUSED"
+    if return-code == ConnAckPacket.UNACCEPTABLE-PROTOCOL-VERSION:
+      refused-reason = "UNACCEPTABLE_PROTOCOL_VERSION"
+    else if return-code == ConnAckPacket.IDENTIFIER-REJECTED:
+      refused-reason = "IDENTIFIER_REJECTED"
+    else if return-code == ConnAckPacket.SERVER-UNAVAILABLE:
+      refused-reason = "SERVER_UNAVAILABLE"
+    else if return-code == ConnAckPacket.BAD-USERNAME-OR-PASSWORD:
+      refused-reason = "BAD_USERNAME_OR_PASSWORD"
+    else if return-code == ConnAckPacket.NOT-AUTHORIZED:
+      refused-reason = "NOT_AUTHORIZED"
+    return refused-reason
 
   /**
   Connects (or reconnects) to the broker.
 
   Uses the reconnection_strategy to do the actual connecting.
   */
-  reconnect_ --is_initial_connection/bool -> none:
-    assert: not connection_ or not connection_.is_alive
-    old_connection := connection_
+  reconnect_ --is-initial-connection/bool -> none:
+    assert: not connection_ or not connection_.is-alive
+    old-connection := connection_
 
     connecting_.do:
       // Check that nobody else reconnected while we waited to take the lock.
-      if connection_ != old_connection: return
+      if connection_ != old-connection: return
 
       if not connection_:
-        assert: is_initial_connection
+        assert: is-initial-connection
         connection_ = Connection_ transport_
-            --keep_alive=session_.options.keep_alive
+            --keep-alive=session_.options.keep-alive
             --logger=logger_
 
       try:
-        reconnection_strategy_.connect transport_
-            --is_initial_connection = is_initial_connection
-            --reconnect_transport = :
+        reconnection-strategy_.connect transport_
+            --is-initial-connection = is-initial-connection
+            --reconnect-transport = :
               transport_.reconnect
               connection_ = Connection_ transport_
-                  --keep_alive=session_.options.keep_alive
+                  --keep-alive=session_.options.keep-alive
                   --logger=logger_
-            --disconnect_transport = :
+            --disconnect-transport = :
               transport_.disconnect
-            --send_connect = :
-              packet := ConnectPacket session_.options.client_id
-                  --clean_session=session_.options.clean_session
+            --send-connect = :
+              packet := ConnectPacket session_.options.client-id
+                  --clean-session=session_.options.clean-session
                   --username=session_.options.username
                   --password=session_.options.password
-                  --keep_alive=session_.options.keep_alive
-                  --last_will=session_.options.last_will
+                  --keep-alive=session_.options.keep-alive
+                  --last-will=session_.options.last-will
               connection_.write packet
-            --receive_connect_ack = :
+            --receive-connect-ack = :
               response := connection_.read
               if not response: throw "CONNECTION_CLOSED"
               ack := (response as ConnAckPacket)
-              return_code := ack.return_code
-              if return_code != 0:
-                refused_reason := refused_reason_for_return_code_ return_code
-                connection_.close --reason=refused_reason
+              return-code := ack.return-code
+              if return-code != 0:
+                refused-reason := refused-reason-for-return-code_ return-code
+                connection_.close --reason=refused-reason
                 // The broker refused the connection. This means that the
                 // problem isn't due to a bad connection but almost certainly due to
                 // some bad arguments (like a bad client-id). As such don't try to reconnect
                 // again and just give up.
                 close --force
-                throw refused_reason
-              ack.session_present
+                throw refused-reason
+              ack.session-present
             --disconnect = :
               connection_.write DisconnectPacket
-      finally: | is_exception exception |
-        if is_exception:
+      finally: | is-exception exception |
+        if is-exception:
           close --force
 
       // If we are here, then the reconnection succeeded.
 
       // Make sure the connection sends pings so the broker doesn't drop us.
-      connection_.keep_alive --background
+      connection_.keep-alive --background
 
       // Resend the pending messages.
       session_.do --pending: | persisted/PersistedPacket |
-        packet_id := persisted.packet_id
+        packet-id := persisted.packet-id
         topic := persisted.topic
         payload := persisted.payload
         retain := persisted.retain
-        packet := PublishPacket topic payload --packet_id=packet_id --qos=1 --retain=retain --duplicate
+        packet := PublishPacket topic payload --packet-id=packet-id --qos=1 --retain=retain --duplicate
         connection_.write packet
 
   /** Tears down the client. */
-  tear_down_:
-    critical_do:
-      state_ = STATE_CLOSED_
-      if reconnection_strategy_: reconnection_strategy_.close
+  tear-down_:
+    critical-do:
+      state_ = STATE-CLOSED_
+      if reconnection-strategy_: reconnection-strategy_.close
       connection_.close
-      if not handling_latch_.has_value: handling_latch_.set false
+      if not handling-latch_.has-value: handling-latch_.set false

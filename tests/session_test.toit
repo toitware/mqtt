@@ -10,9 +10,9 @@ import mqtt.transport as mqtt
 import mqtt.packets as mqtt
 import net
 
-import .broker_internal
-import .broker_mosquitto
-import .packet_test_client
+import .broker-internal
+import .broker-mosquitto
+import .packet-test-client
 import .transport
 
 /**
@@ -24,44 +24,44 @@ When the clean session flag is given, then the session should start fresh. Also,
 When the clean session flag is not given, then the old session should be found (assuming
   there is one).
 */
-test_clean_session create_transport/Lambda --logger/log.Logger:
+test-clean-session create-transport/Lambda --logger/log.Logger:
   // First connection should be clean.
-  with_packet_client create_transport
-      --logger=logger: | client/mqtt.FullClient wait_for_idle/Lambda clear/Lambda get_activity/Lambda |
-    activity := get_activity.call
-    connect_ack /mqtt.ConnAckPacket := (activity.filter: it[0] == "read" and it[1] is mqtt.ConnAckPacket).first[1]
-    expect_not connect_ack.session_present
+  with-packet-client create-transport
+      --logger=logger: | client/mqtt.FullClient wait-for-idle/Lambda clear/Lambda get-activity/Lambda |
+    activity := get-activity.call
+    connect-ack /mqtt.ConnAckPacket := (activity.filter: it[0] == "read" and it[1] is mqtt.ConnAckPacket).first[1]
+    expect-not connect-ack.session-present
 
   // Second connection should be clean too.
-  with_packet_client create_transport
-      --logger=logger: | client/mqtt.FullClient wait_for_idle/Lambda clear/Lambda get_activity/Lambda |
-    activity := get_activity.call
-    connect_ack /mqtt.ConnAckPacket := (activity.filter: it[0] == "read" and it[1] is mqtt.ConnAckPacket).first[1]
-    expect_not connect_ack.session_present
+  with-packet-client create-transport
+      --logger=logger: | client/mqtt.FullClient wait-for-idle/Lambda clear/Lambda get-activity/Lambda |
+    activity := get-activity.call
+    connect-ack /mqtt.ConnAckPacket := (activity.filter: it[0] == "read" and it[1] is mqtt.ConnAckPacket).first[1]
+    expect-not connect-ack.session-present
 
   // Third connection should be clean, but we now connect without clean_session.
-  with_packet_client create_transport
-      --no-clean_session
-      --logger=logger: | client/mqtt.FullClient wait_for_idle/Lambda clear/Lambda get_activity/Lambda |
-    activity := get_activity.call
-    connect_ack /mqtt.ConnAckPacket := (activity.filter: it[0] == "read" and it[1] is mqtt.ConnAckPacket).first[1]
-    expect_not connect_ack.session_present
+  with-packet-client create-transport
+      --no-clean-session
+      --logger=logger: | client/mqtt.FullClient wait-for-idle/Lambda clear/Lambda get-activity/Lambda |
+    activity := get-activity.call
+    connect-ack /mqtt.ConnAckPacket := (activity.filter: it[0] == "read" and it[1] is mqtt.ConnAckPacket).first[1]
+    expect-not connect-ack.session-present
 
   // Now we should have a session.
-  with_packet_client create_transport
-      --no-clean_session
-      --logger=logger: | client/mqtt.FullClient wait_for_idle/Lambda clear/Lambda get_activity/Lambda |
-    activity := get_activity.call
-    connect_ack /mqtt.ConnAckPacket := (activity.filter: it[0] == "read" and it[1] is mqtt.ConnAckPacket).first[1]
-    expect connect_ack.session_present
+  with-packet-client create-transport
+      --no-clean-session
+      --logger=logger: | client/mqtt.FullClient wait-for-idle/Lambda clear/Lambda get-activity/Lambda |
+    activity := get-activity.call
+    connect-ack /mqtt.ConnAckPacket := (activity.filter: it[0] == "read" and it[1] is mqtt.ConnAckPacket).first[1]
+    expect connect-ack.session-present
 
   // Connecting again with a clean-session flag yields in no-session again.
   // Third connection should be clean, but we now connect without clean_session.
-  with_packet_client create_transport
-      --logger=logger : | client/mqtt.FullClient wait_for_idle/Lambda clear/Lambda get_activity/Lambda |
-    activity := get_activity.call
-    connect_ack /mqtt.ConnAckPacket := (activity.filter: it[0] == "read" and it[1] is mqtt.ConnAckPacket).first[1]
-    expect_not connect_ack.session_present
+  with-packet-client create-transport
+      --logger=logger : | client/mqtt.FullClient wait-for-idle/Lambda clear/Lambda get-activity/Lambda |
+    activity := get-activity.call
+    connect-ack /mqtt.ConnAckPacket := (activity.filter: it[0] == "read" and it[1] is mqtt.ConnAckPacket).first[1]
+    expect-not connect-ack.session-present
 
 /**
 Tests that the subscriptions are remembered when the broker has a session for the client.
@@ -70,220 +70,220 @@ This is the easiest way to see whether the broker keeps some state for the clien
 
 Also test that messages to subscription are buffered when the client isn't connected.
 */
-test_subscriptions create_transport/Lambda --logger/log.Logger:
+test-subscriptions create-transport/Lambda --logger/log.Logger:
   topic := "session-topic"
 
   // Clear the sub-client session.
-  with_packet_client create_transport
-      --client_id = "sub-client"
-      --clean_session
-      --logger=logger: | client/mqtt.FullClient wait_for_idle/Lambda clear/Lambda get_activity/Lambda |
+  with-packet-client create-transport
+      --client-id = "sub-client"
+      --clean-session
+      --logger=logger: | client/mqtt.FullClient wait-for-idle/Lambda clear/Lambda get-activity/Lambda |
     null
 
-  with_packet_client create_transport
-      --client_id = "sub-client"
-      --no-clean_session
-      --logger=logger: | client/mqtt.FullClient wait_for_idle/Lambda clear/Lambda get_activity/Lambda |
+  with-packet-client create-transport
+      --client-id = "sub-client"
+      --no-clean-session
+      --logger=logger: | client/mqtt.FullClient wait-for-idle/Lambda clear/Lambda get-activity/Lambda |
 
     // Subscribe to topic, and then immediately close the connection.
     client.subscribe topic
-    wait_for_idle.call
+    wait-for-idle.call
 
-  with_packet_client create_transport
+  with-packet-client create-transport
       --logger = logger
-      --client_id = "other-client": | other_client/mqtt.FullClient _ _ _ |
+      --client-id = "other-client": | other-client/mqtt.FullClient _ _ _ |
 
     // This message is sent when the client is not alive.
     // The broker's session will cache it and send it when the client reconnects.
-    other_client.publish topic "hello0".to_byte_array --qos=1
+    other-client.publish topic "hello0".to-byte-array --qos=1
 
-    with_packet_client create_transport
-        --client_id = "sub-client"
-        --no-clean_session
-        --logger=logger: | client/mqtt.FullClient wait_for_idle/Lambda clear/Lambda get_activity/Lambda |
+    with-packet-client create-transport
+        --client-id = "sub-client"
+        --no-clean-session
+        --logger=logger: | client/mqtt.FullClient wait-for-idle/Lambda clear/Lambda get-activity/Lambda |
 
-      wait_for_idle.call
-      activity := get_activity.call
+      wait-for-idle.call
+      activity := get-activity.call
       messages := activity.filter: it[0] == "read" and it[1] is mqtt.PublishPacket
       message := messages.first[1]
-      expect_equals topic message.topic
-      expect_equals "hello0" message.payload.to_string
+      expect-equals topic message.topic
+      expect-equals "hello0" message.payload.to-string
 
       clear.call
 
-      other_client.publish topic "hello1".to_byte_array --qos=0
+      other-client.publish topic "hello1".to-byte-array --qos=0
 
-      saw_message := false
+      saw-message := false
       for i := 0; i < 5; i++:
-        activity = get_activity.call
+        activity = get-activity.call
         messages = activity.filter: it[0] == "read" and it[1] is mqtt.PublishPacket
-        if messages.is_empty:
+        if messages.is-empty:
           sleep --ms=(100 * i)
           continue
         message = messages.first[1]
-        expect_equals topic message.topic
-        expect_equals "hello1" message.payload.to_string
-        saw_message = true
+        expect-equals topic message.topic
+        expect-equals "hello1" message.payload.to-string
+        saw-message = true
         break
-      expect saw_message
+      expect saw-message
 
 /**
 Tests that the client resends messages when it hasn't received the broker's acks.
 */
-test_client_qos create_transport/Lambda --logger/log.Logger:
-  client_id := "test-client-qos"
+test-client-qos create-transport/Lambda --logger/log.Logger:
+  client-id := "test-client-qos"
   topic := "test-resend"
 
   // Connect once to clear the session.
-  with_packet_client create_transport
+  with-packet-client create-transport
       --logger = logger
-      --client_id = client_id
-      --clean_session:
+      --client-id = client-id
+      --clean-session:
     null
 
   // The read filter intercepts the first puback and sets the latch.
-  intercepted_latch := monitor.Latch
-  read_filter := :: | packet/mqtt.Packet |
-    if not intercepted_latch.has_value and packet is mqtt.PubAckPacket:
-      intercepted_latch.set (packet as mqtt.PubAckPacket).packet_id
+  intercepted-latch := monitor.Latch
+  read-filter := :: | packet/mqtt.Packet |
+    if not intercepted-latch.has-value and packet is mqtt.PubAckPacket:
+      intercepted-latch.set (packet as mqtt.PubAckPacket).packet-id
       null
     else:
       packet
 
-  first_after_intercepted_pub_ack := true
-  write_filter := :: | packet/mqtt.Packet |
-    if intercepted_latch.has_value and first_after_intercepted_pub_ack:
-      first_after_intercepted_pub_ack = false
+  first-after-intercepted-pub-ack := true
+  write-filter := :: | packet/mqtt.Packet |
+    if intercepted-latch.has-value and first-after-intercepted-pub-ack:
+      first-after-intercepted-pub-ack = false
       throw "disconnect"
     packet
 
-  with_packet_client create_transport
-      --client_id = client_id
-      --read_filter = read_filter
-      --write_filter = write_filter
-      --no-clean_session
-      --logger=logger: | client/mqtt.FullClient wait_for_idle/Lambda clear/Lambda get_activity/Lambda |
+  with-packet-client create-transport
+      --client-id = client-id
+      --read-filter = read-filter
+      --write-filter = write-filter
+      --no-clean-session
+      --logger=logger: | client/mqtt.FullClient wait-for-idle/Lambda clear/Lambda get-activity/Lambda |
 
-    wait_for_idle.call
+    wait-for-idle.call
     clear.call
 
-    client.publish topic "ack is lost".to_byte_array --qos=1
-    intercepted_packet_id := intercepted_latch.get
+    client.publish topic "ack is lost".to-byte-array --qos=1
+    intercepted-packet-id := intercepted-latch.get
     clear.call
 
     // The ack from the server was intercepted.
     // Bring down the transport to simulate a disconnect.
     // The client should reconnect and resend the message.
-    client.publish "random_topic" "write_filter_intercepts".to_byte_array --qos=0
+    client.publish "random_topic" "write_filter_intercepts".to-byte-array --qos=0
 
-    wait_for_idle.call
+    wait-for-idle.call
 
-    activity := get_activity.call
+    activity := get-activity.call
     expect (activity.any: it[0] == "reconnect")
-    publish_packets := (activity.filter: it[0] == "write" and it[1] is mqtt.PublishPacket).map: it[1]
+    publish-packets := (activity.filter: it[0] == "write" and it[1] is mqtt.PublishPacket).map: it[1]
     // We expect two packets:
     // - the resent packet
     // - the packet for which we got an exception
-    expect_equals 2 publish_packets.size
-    resent /mqtt.PublishPacket := publish_packets[0]
-    random_topic_packet /mqtt.PublishPacket := publish_packets[1]
-    expect_equals topic resent.topic
+    expect-equals 2 publish-packets.size
+    resent /mqtt.PublishPacket := publish-packets[0]
+    random-topic-packet /mqtt.PublishPacket := publish-packets[1]
+    expect-equals topic resent.topic
     expect resent.duplicate
-    expect_equals intercepted_packet_id resent.packet_id
+    expect-equals intercepted-packet-id resent.packet-id
 
-    ack_packets := (activity.filter: it[0] == "read" and it[1] is mqtt.PubAckPacket).map: it[1]
-    expect_equals 1 ack_packets.size
+    ack-packets := (activity.filter: it[0] == "read" and it[1] is mqtt.PubAckPacket).map: it[1]
+    expect-equals 1 ack-packets.size
 
 /**
 Tests that the broker resends messages when it hasn't received the client's acks.
 */
-test_broker_qos create_transport/Lambda --logger/log.Logger:
+test-broker-qos create-transport/Lambda --logger/log.Logger:
   // Create a client that will send a message to the client we are testing.
-  with_packet_client create_transport
-      --clean_session
-      --logger=logger: | other_client/mqtt.FullClient _ _ _ |
+  with-packet-client create-transport
+      --clean-session
+      --logger=logger: | other-client/mqtt.FullClient _ _ _ |
 
-    client_id := "test-broker-qos"
+    client-id := "test-broker-qos"
     topic := "test-resend"
 
     // Connect once to clear the session.
-    with_packet_client create_transport
+    with-packet-client create-transport
         --logger = logger
-        --client_id = client_id
-        --clean_session:
+        --client-id = client-id
+        --clean-session:
       null
 
     // The write filter intercepts the first puback and sets the latch.
-    intercepted_latch := monitor.Latch
+    intercepted-latch := monitor.Latch
 
-    ack_counter := 0
-    write_filter := :: | packet/mqtt.Packet |
-      if packet is mqtt.PubAckPacket: ack_counter++
-      if ack_counter == 3 and not intercepted_latch.has_value and packet is mqtt.PubAckPacket:
-        intercepted_latch.set (packet as mqtt.PubAckPacket).packet_id
+    ack-counter := 0
+    write-filter := :: | packet/mqtt.Packet |
+      if packet is mqtt.PubAckPacket: ack-counter++
+      if ack-counter == 3 and not intercepted-latch.has-value and packet is mqtt.PubAckPacket:
+        intercepted-latch.set (packet as mqtt.PubAckPacket).packet-id
         throw "disconnect"
       else:
         packet
 
-    with_packet_client create_transport
-        --client_id = client_id
-        --write_filter = write_filter
-        --no-clean_session
-        --logger=logger: | client/mqtt.FullClient wait_for_idle/Lambda clear/Lambda get_activity/Lambda |
+    with-packet-client create-transport
+        --client-id = client-id
+        --write-filter = write-filter
+        --no-clean-session
+        --logger=logger: | client/mqtt.FullClient wait-for-idle/Lambda clear/Lambda get-activity/Lambda |
 
       client.subscribe topic
-      wait_for_idle.call
+      wait-for-idle.call
       clear.call
 
-      other_client.publish topic "increase packet id".to_byte_array --qos=1
-      other_client.publish topic "increase packet id".to_byte_array --qos=1
+      other-client.publish topic "increase packet id".to-byte-array --qos=1
+      other-client.publish topic "increase packet id".to-byte-array --qos=1
 
-      wait_for_idle.call
+      wait-for-idle.call
       clear.call
 
       // The other client now sends a message for which the ack is lost,
       // and where the server needs to resend the message.
-      other_client.publish topic "ack is lost".to_byte_array --qos=1
-      intercepted_packet_id := intercepted_latch.get
+      other-client.publish topic "ack is lost".to-byte-array --qos=1
+      intercepted-packet-id := intercepted-latch.get
 
-      wait_for_idle.call
+      wait-for-idle.call
 
-      activity := get_activity.call
+      activity := get-activity.call
       expect (activity.any: it[0] == "reconnect")
 
-      publish_packets := (activity.filter: it[0] == "read" and it[1] is mqtt.PublishPacket).map: it[1]
+      publish-packets := (activity.filter: it[0] == "read" and it[1] is mqtt.PublishPacket).map: it[1]
       // We expect two packets:
       // - the initial packet
       // - the resent packet
-      expect_equals 2 publish_packets.size
-      original /mqtt.PublishPacket := publish_packets[0]
-      resent /mqtt.PublishPacket := publish_packets[1]
-      expect_equals topic original.topic
-      expect_equals topic resent.topic
-      expect_equals original.packet_id resent.packet_id
-      expect_not original.duplicate
+      expect-equals 2 publish-packets.size
+      original /mqtt.PublishPacket := publish-packets[0]
+      resent /mqtt.PublishPacket := publish-packets[1]
+      expect-equals topic original.topic
+      expect-equals topic resent.topic
+      expect-equals original.packet-id resent.packet-id
+      expect-not original.duplicate
       expect resent.duplicate
-      expect_equals intercepted_packet_id resent.packet_id
+      expect-equals intercepted-packet-id resent.packet-id
 
-      ack_packets := (activity.filter: it[0] == "write" and it[1] is mqtt.PubAckPacket).map: it[1]
+      ack-packets := (activity.filter: it[0] == "write" and it[1] is mqtt.PubAckPacket).map: it[1]
       // We immediately resend the ack packet as soon as the connection is established again.
       // However, the broker also sends the same packet again.
       // We end up with two acks for the same packet.
-      expect_equals 2 ack_packets.size
+      expect-equals 2 ack-packets.size
       2.repeat:
-        expect_equals intercepted_packet_id ack_packets[it].packet_id
+        expect-equals intercepted-packet-id ack-packets[it].packet-id
 
-test create_transport/Lambda --logger/log.Logger:
-  test_clean_session create_transport --logger=logger
-  test_subscriptions create_transport --logger=logger
-  test_client_qos create_transport --logger=logger
-  test_broker_qos create_transport --logger=logger
+test create-transport/Lambda --logger/log.Logger:
+  test-clean-session create-transport --logger=logger
+  test-subscriptions create-transport --logger=logger
+  test-client-qos create-transport --logger=logger
+  test-broker-qos create-transport --logger=logger
 
 main args:
-  test_with_mosquitto := args.contains "--mosquitto"
-  log_level := log.ERROR_LEVEL
-  logger := log.default.with_level log_level
+  test-with-mosquitto := args.contains "--mosquitto"
+  log-level := log.ERROR-LEVEL
+  logger := log.default.with-level log-level
 
-  run_test := : | create_transport/Lambda | test create_transport --logger=logger
-  if test_with_mosquitto: with_mosquitto --logger=logger run_test
-  else: with_internal_broker --logger=logger run_test
+  run-test := : | create-transport/Lambda | test create-transport --logger=logger
+  if test-with-mosquitto: with-mosquitto --logger=logger run-test
+  else: with-internal-broker --logger=logger run-test

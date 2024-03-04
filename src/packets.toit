@@ -6,8 +6,8 @@ import bytes
 import binary
 import reader
 
-import .last_will
-import .topic_qos
+import .last-will
+import .topic-qos
 
 abstract class Packet:
   type/int
@@ -16,13 +16,13 @@ abstract class Packet:
   constructor .type --.flags=0:
 
   static deserialize reader/reader.BufferedReader -> Packet?:
-    if not reader.can_ensure 1: return null
-    byte1 := reader.read_byte
+    if not reader.can-ensure 1: return null
+    byte1 := reader.read-byte
     kind := byte1 >> 4
     flags := byte1 & 0xf
     size := 0
     for i := 0; i < 4; i++:
-      byte := reader.read_byte
+      byte := reader.read-byte
       size |= (byte & 0x7f) << (i * 7)
       if byte & 0x80 == 0: break
     if kind == ConnectPacket.TYPE:
@@ -50,11 +50,11 @@ abstract class Packet:
 
     throw "invalid packet kind: $kind"
 
-  abstract variable_header -> ByteArray
+  abstract variable-header -> ByteArray
 
   abstract payload -> ByteArray
 
-  ensure_drained_ -> none:
+  ensure-drained_ -> none:
     // Most packets drain the reader they deserialize from eagerly, but
     // we allow streaming the payload for a few types. For those, we
     // override this method and make sure the whole payload has been
@@ -62,96 +62,96 @@ abstract class Packet:
 
   serialize -> ByteArray:
     buffer := bytes.Buffer
-    buffer.write_byte type << 4 | flags
+    buffer.write-byte type << 4 | flags
 
-    header := variable_header
+    header := variable-header
     payload := payload
 
-    encode_length buffer header.size + payload.size
+    encode-length buffer header.size + payload.size
 
     buffer.write header
     buffer.write payload
 
     return buffer.bytes
 
-  static encode_length buffer/bytes.Buffer length/int:
+  static encode-length buffer/bytes.Buffer length/int:
     if length == 0:
-      buffer.write_byte 0
+      buffer.write-byte 0
       return
 
     while length > 0:
       byte := length & 0x7f
       length >>= 7
       if length > 0: byte |= 0x80
-      buffer.write_byte byte
+      buffer.write-byte byte
 
-  static encode_string buffer/bytes.Buffer str/string:
+  static encode-string buffer/bytes.Buffer str/string:
     length := ByteArray 2
-    binary.BIG_ENDIAN.put_uint16 length 0 str.size
+    binary.BIG-ENDIAN.put-uint16 length 0 str.size
     buffer.write length
     buffer.write str
 
-  static encode_uint16 value/int -> ByteArray:
+  static encode-uint16 value/int -> ByteArray:
     result := ByteArray 2
-    binary.BIG_ENDIAN.put_uint16 result 0 value
+    binary.BIG-ENDIAN.put-uint16 result 0 value
     return result
 
-  static decode_string reader/reader.BufferedReader -> string:
-    length := decode_uint16 reader
-    return reader.read_string length
+  static decode-string reader/reader.BufferedReader -> string:
+    length := decode-uint16 reader
+    return reader.read-string length
 
-  static decode_uint16 reader/reader.BufferedReader -> int:
-    length_bytes := reader.read_bytes 2
-    return binary.BIG_ENDIAN.uint16 length_bytes 0
+  static decode-uint16 reader/reader.BufferedReader -> int:
+    length-bytes := reader.read-bytes 2
+    return binary.BIG-ENDIAN.uint16 length-bytes 0
 
-  static debug_string_ packet/Packet -> string:
+  static debug-string_ packet/Packet -> string:
     if packet is ConnectPacket:
       connect := packet as ConnectPacket
-      return ("Connect: $connect.client_id"
-              + " $(connect.clean_session ? "clean": "reuse")"
-              + " $(connect.last_will ? "last-will-for-$connect.last_will.topic": "no-last-will")"
+      return ("Connect: $connect.client-id"
+              + " $(connect.clean-session ? "clean": "reuse")"
+              + " $(connect.last-will ? "last-will-for-$connect.last-will.topic": "no-last-will")"
               + " $(connect.username ? "with-username-$connect.username": "no-username")"
               + " $(connect.password ? "with-password-$connect.password": "no-password")"
-              + " $(connect.keep_alive)")
+              + " $(connect.keep-alive)")
     else if packet is PingReqPacket:
       return "Ping request"
     else if packet is PingRespPacket:
       return "Ping response"
     else if packet is ConnAckPacket:
       connack := packet as ConnAckPacket
-      return "ConnAck: $connack.return_code $connack.session_present"
+      return "ConnAck: $connack.return-code $connack.session-present"
     else if packet is PublishPacket:
       publish := packet as PublishPacket
-      result := "Publish$(publish.packet_id ? "($publish.packet_id)" : "")"
+      result := "Publish$(publish.packet-id ? "($publish.packet-id)" : "")"
           + " topic=$publish.topic"
           + " qos=$publish.qos"
           + " $(publish.duplicate ? "dup": "no-dup")"
           + " $(publish.retain ? "retain": "no-retain")"
           + " $(publish.payload.size) bytes"
       if publish.payload.size < 15 and (publish.payload.every: it < 128):
-        result += " \"$(publish.payload.to_string_non_throwing)\""
+        result += " \"$(publish.payload.to-string-non-throwing)\""
       return result
     else if packet is PubAckPacket:
       puback := packet as PubAckPacket
-      return "PubAck($puback.packet_id)"
+      return "PubAck($puback.packet-id)"
     else if packet is SubscribePacket:
       subscribe := packet as SubscribePacket
-      result := "Subscribe($subscribe.packet_id)"
-      subscribe.topics.do: | topic_qos/TopicQos |
-        result += " $topic_qos.topic-$topic_qos.max_qos"
+      result := "Subscribe($subscribe.packet-id)"
+      subscribe.topics.do: | topic-qos/TopicQos |
+        result += " $topic-qos.topic-$topic-qos.max-qos"
       return result
     else if packet is SubAckPacket:
       suback := packet as SubAckPacket
-      return "SubAck($suback.packet_id)"
+      return "SubAck($suback.packet-id)"
     else if packet is UnsubscribePacket:
       unsubscribe := packet as UnsubscribePacket
-      result := "Unsubscribe($unsubscribe.packet_id)"
+      result := "Unsubscribe($unsubscribe.packet-id)"
       unsubscribe.topics.do:
         result += " $it"
       return result
     else if packet is UnsubAckPacket:
       unsuback := packet as UnsubAckPacket
-      return "UnsubAck($unsuback.packet_id)"
+      return "UnsubAck($unsuback.packet-id)"
     else if packet is DisconnectPacket:
       disconnect := packet as DisconnectPacket
       return "Disconnect"
@@ -161,105 +161,105 @@ abstract class Packet:
 class ConnectPacket extends Packet:
   static TYPE ::= 1
 
-  client_id /string
-  clean_session /bool
+  client-id /string
+  clean-session /bool
   username /string?
   password /string?
-  keep_alive /Duration?
-  last_will /LastWill?
+  keep-alive /Duration?
+  last-will /LastWill?
 
-  constructor .client_id --.clean_session --.username --.password --.keep_alive --.last_will:
+  constructor .client-id --.clean-session --.username --.password --.keep-alive --.last-will:
     super TYPE
 
   constructor.deserialize_ reader/reader.BufferedReader:
-    protocol := Packet.decode_string reader
+    protocol := Packet.decode-string reader
     if protocol != "MQTT": throw "UNEQUAL PROTOCOL $protocol"
-    level := reader.read_byte
+    level := reader.read-byte
     if level != 4: throw "UNEXPECTED PROTOCOL LEVEL: $level"
-    connect_flags := reader.read_byte
-    clean_session = connect_flags & 0b0000_0010 != 0
-    has_username := connect_flags & 0b1000_0000 != 0
-    has_password := connect_flags & 0b0100_0000 != 0
-    has_last_will := connect_flags & 0b0000_0100 != 0
-    last_will_remain := connect_flags & 0b0010_0000 != 0
-    last_will_qos := (connect_flags >> 3) & 0b11
+    connect-flags := reader.read-byte
+    clean-session = connect-flags & 0b0000_0010 != 0
+    has-username := connect-flags & 0b1000_0000 != 0
+    has-password := connect-flags & 0b0100_0000 != 0
+    has-last-will := connect-flags & 0b0000_0100 != 0
+    last-will-remain := connect-flags & 0b0010_0000 != 0
+    last-will-qos := (connect-flags >> 3) & 0b11
 
-    keep_alive = Duration --s=(Packet.decode_uint16 reader)
+    keep-alive = Duration --s=(Packet.decode-uint16 reader)
 
-    client_id = Packet.decode_string reader
-    if has_last_will:
-      last_will_topic := Packet.decode_string reader
-      last_will_payload_size := Packet.decode_uint16 reader
-      last_will_payload := reader.read_bytes last_will_payload_size
-      last_will = LastWill last_will_topic last_will_payload --qos=last_will_qos --retain=last_will_remain
+    client-id = Packet.decode-string reader
+    if has-last-will:
+      last-will-topic := Packet.decode-string reader
+      last-will-payload-size := Packet.decode-uint16 reader
+      last-will-payload := reader.read-bytes last-will-payload-size
+      last-will = LastWill last-will-topic last-will-payload --qos=last-will-qos --retain=last-will-remain
     else:
-      last_will = null
+      last-will = null
 
-    username = has_username ? Packet.decode_string reader : null
-    password = has_password ? Packet.decode_string reader : null
+    username = has-username ? Packet.decode-string reader : null
+    password = has-password ? Packet.decode-string reader : null
 
     super TYPE
 
-  variable_header -> ByteArray:
-    connect_flags := 0
-    if clean_session: connect_flags |= 0b0000_0010
-    if username:      connect_flags |= 0b1000_0000
-    if password:      connect_flags |= 0b0100_0000
-    if last_will:
-      connect_flags                 |= 0b0000_0100
-      connect_flags                 |= last_will.qos << 3
-      if last_will.retain:
-        connect_flags               |= 0b0010_0000
+  variable-header -> ByteArray:
+    connect-flags := 0
+    if clean-session: connect-flags |= 0b0000_0010
+    if username:      connect-flags |= 0b1000_0000
+    if password:      connect-flags |= 0b0100_0000
+    if last-will:
+      connect-flags                 |= 0b0000_0100
+      connect-flags                 |= last-will.qos << 3
+      if last-will.retain:
+        connect-flags               |= 0b0010_0000
 
 
-    data := #[0, 4, 'M', 'Q', 'T', 'T', 4, connect_flags, 0, 0]
-    binary.BIG_ENDIAN.put_uint16 data 8 keep_alive.in_s
+    data := #[0, 4, 'M', 'Q', 'T', 'T', 4, connect-flags, 0, 0]
+    binary.BIG-ENDIAN.put-uint16 data 8 keep-alive.in-s
     return data
 
   payload -> ByteArray:
     buffer := bytes.Buffer
-    Packet.encode_string buffer client_id
-    if last_will:
-      Packet.encode_string buffer last_will.topic
-      buffer.write (Packet.encode_uint16 last_will.payload.size)
-      buffer.write last_will.payload
+    Packet.encode-string buffer client-id
+    if last-will:
+      Packet.encode-string buffer last-will.topic
+      buffer.write (Packet.encode-uint16 last-will.payload.size)
+      buffer.write last-will.payload
 
-    if username: Packet.encode_string buffer username
-    if password: Packet.encode_string buffer password
+    if username: Packet.encode-string buffer username
+    if password: Packet.encode-string buffer password
     return buffer.bytes
 
 class ConnAckPacket extends Packet:
   static TYPE ::= 2
 
-  static UNACCEPTABLE_PROTOCOL_VERSION ::= 0x01
-  static IDENTIFIER_REJECTED ::= 0x02
-  static SERVER_UNAVAILABLE ::= 0x03
-  static BAD_USERNAME_OR_PASSWORD ::= 0x04
-  static NOT_AUTHORIZED ::= 0x05
+  static UNACCEPTABLE-PROTOCOL-VERSION ::= 0x01
+  static IDENTIFIER-REJECTED ::= 0x02
+  static SERVER-UNAVAILABLE ::= 0x03
+  static BAD-USERNAME-OR-PASSWORD ::= 0x04
+  static NOT-AUTHORIZED ::= 0x05
 
-  return_code /int
-  session_present /bool
+  return-code /int
+  session-present /bool
 
-  constructor --.return_code=0 --.session_present=false:
+  constructor --.return-code=0 --.session-present=false:
     super TYPE
 
   constructor.deserialize_ reader/reader.BufferedReader:
-    data := reader.read_bytes 2
-    session_present = data[0] & 0x01 != 0
-    return_code = data[1]
+    data := reader.read-bytes 2
+    session-present = data[0] & 0x01 != 0
+    return-code = data[1]
     super TYPE
 
-  variable_header -> ByteArray:
-    return #[ session_present ? 1 : 0, return_code]
+  variable-header -> ByteArray:
+    return #[ session-present ? 1 : 0, return-code]
 
   payload -> ByteArray: return #[]
 
 class PublishPacket extends Packet:
-  static ID_BIT_SIZE ::= 16
+  static ID-BIT-SIZE ::= 16
   static TYPE ::= 3
 
   topic /string
-  packet_id /int?
+  packet-id /int?
 
   reader_ /PublishPacketReader_? := ?
   payload_ /ByteArray? := ?
@@ -268,18 +268,18 @@ class PublishPacket extends Packet:
     retain := flags & 0b0001 != 0
     qos := (flags & 0b0110) >> 1
     duplicate := flags & 0b1000 != 0
-    topic = Packet.decode_string reader
+    topic = Packet.decode-string reader
     size -= 2 + topic.size
     if qos > 0:
-      packet_id = Packet.decode_uint16 reader
+      packet-id = Packet.decode-uint16 reader
       size -= 2
     else:
-      packet_id = null
+      packet-id = null
     reader_ = PublishPacketReader_ reader size
     payload_ = null
     super TYPE --flags=(duplicate ? 0b1000 : 0) | (qos << 1) | (retain ? 1 : 0)
 
-  constructor .topic payload/ByteArray --qos/int --retain/bool --.packet_id --duplicate=false:
+  constructor .topic payload/ByteArray --qos/int --retain/bool --.packet-id --duplicate=false:
     reader_ = null
     payload_ = payload
     super TYPE
@@ -288,25 +288,25 @@ class PublishPacket extends Packet:
   payload -> ByteArray:
     payload := payload_
     if payload: return payload
-    payload = reader_.read_payload_
+    payload = reader_.read-payload_
     if not payload: throw "Already streaming payload"
     payload_ = payload
     reader_ = null
     return payload
 
-  payload_stream -> reader.SizedReader:
+  payload-stream -> reader.SizedReader:
     if payload_: throw "Already read payload"
     return reader_.stream_
 
-  ensure_drained_ -> none:
+  ensure-drained_ -> none:
     if not reader_: return
     reader_.drain_
     reader_ = null
 
-  variable_header -> ByteArray:
+  variable-header -> ByteArray:
     buffer := bytes.Buffer
-    Packet.encode_string buffer topic
-    if packet_id: buffer.write (Packet.encode_uint16 packet_id)
+    Packet.encode-string buffer topic
+    if packet-id: buffer.write (Packet.encode-uint16 packet-id)
     return buffer.bytes
 
   retain -> bool: return flags & 0b1 != 0
@@ -317,7 +317,7 @@ class PublishPacket extends Packet:
   Creates a new packet with the provided parameters replacing the current values.
 
   Optional arguments don't work if one wants to pass in null. As such, the
-    $packet_id must be given as integer. If the packet-id should be null, then '-1' should
+    $packet-id must be given as integer. If the packet-id should be null, then '-1' should
     be used instead.
   */
   with -> PublishPacket
@@ -325,18 +325,18 @@ class PublishPacket extends Packet:
       --payload/ByteArray?=null
       --qos/int?=null
       --retain/bool?=null
-      --packet_id/int=-2
+      --packet-id/int=-2
       --duplicate/bool?=null:
-    new_packet_id /int? := ?
-    if packet_id == -2: new_packet_id = this.packet_id
-    else if packet_id == -1: new_packet_id = null
-    else: new_packet_id = packet_id
+    new-packet-id /int? := ?
+    if packet-id == -2: new-packet-id = this.packet-id
+    else if packet-id == -1: new-packet-id = null
+    else: new-packet-id = packet-id
     return PublishPacket
         topic or this.topic
         payload or this.payload
         --qos = qos or this.qos
         --retain = retain != null ? retain : this.retain
-        --packet_id = new_packet_id
+        --packet-id = new-packet-id
         --duplicate = duplicate != null ? duplicate : this.duplicate
 
 class PublishPacketReader_ implements reader.SizedReader:
@@ -350,7 +350,7 @@ class PublishPacketReader_ implements reader.SizedReader:
     remaining := remaining_
     assert: remaining != null  // Should have called $stream_ already.
     if remaining == 0: return null
-    bytes := reader_.read --max_size=remaining
+    bytes := reader_.read --max-size=remaining
     if bytes: remaining_ = remaining - bytes.size
     return bytes
 
@@ -364,28 +364,28 @@ class PublishPacketReader_ implements reader.SizedReader:
     reader_.skip (remaining or size)
     remaining_ = 0
 
-  read_payload_ -> ByteArray?:
+  read-payload_ -> ByteArray?:
     // If we already started streaming from the underlying reader,
     // we cannot produce a payload.
     if remaining_ != null: return null
-    payload := reader_.read_bytes size
+    payload := reader_.read-bytes size
     remaining_ = 0
     return payload
 
 class PubAckPacket extends Packet:
   static TYPE ::= 4
 
-  packet_id/int
+  packet-id/int
 
-  constructor --.packet_id:
+  constructor --.packet-id:
     super TYPE
 
   constructor.deserialize_ reader/reader.BufferedReader:
-    packet_id = Packet.decode_uint16 reader
+    packet-id = Packet.decode-uint16 reader
     super TYPE
 
-  variable_header -> ByteArray:
-    return Packet.encode_uint16 packet_id
+  variable-header -> ByteArray:
+    return Packet.encode-uint16 packet-id
 
   payload -> ByteArray: return #[]
 
@@ -393,55 +393,55 @@ class SubscribePacket extends Packet:
   static TYPE ::= 8
 
   topics/List/*<TopicFilter>*/
-  packet_id/int
+  packet-id/int
 
-  constructor .topics --.packet_id:
+  constructor .topics --.packet-id:
     super TYPE --flags=0b0010
 
   constructor.deserialize_ reader/reader.BufferedReader size/int:
     consumed := 0
-    packet_id = Packet.decode_uint16 reader
+    packet-id = Packet.decode-uint16 reader
     consumed += 2
     topics = []
     while consumed < size:
-      topic := Packet.decode_string reader
+      topic := Packet.decode-string reader
       consumed += 2 + topic.size
-      max_qos := reader.read_byte
+      max-qos := reader.read-byte
       consumed++
-      topic_qos := TopicQos topic --max_qos=max_qos
-      topics.add topic_qos
+      topic-qos := TopicQos topic --max-qos=max-qos
+      topics.add topic-qos
     super TYPE --flags=0b0010
 
-  variable_header -> ByteArray:
-    return Packet.encode_uint16 packet_id
+  variable-header -> ByteArray:
+    return Packet.encode-uint16 packet-id
 
   payload -> ByteArray:
     buffer := bytes.Buffer
-    topics.do: | topic_qos/TopicQos |
-      Packet.encode_string buffer topic_qos.topic
-      buffer.write_byte topic_qos.max_qos
+    topics.do: | topic-qos/TopicQos |
+      Packet.encode-string buffer topic-qos.topic
+      buffer.write-byte topic-qos.max-qos
     return buffer.bytes
 
 class SubAckPacket extends Packet:
   static TYPE ::= 9
 
   /** The qos value for a failed subscription. */
-  static FAILED_SUBSCRIPTION_QOS ::= 0x80
+  static FAILED-SUBSCRIPTION-QOS ::= 0x80
 
-  packet_id /int
+  packet-id /int
   qos /List  // The list of qos matches the list of topics from the SubPacket.
 
-  constructor --.packet_id --.qos:
+  constructor --.packet-id --.qos:
     super TYPE
 
   constructor.deserialize_ reader/reader.BufferedReader size/int:
-    packet_id = Packet.decode_uint16 reader
+    packet-id = Packet.decode-uint16 reader
     size -= 2
-    qos = List size: reader.read_byte
+    qos = List size: reader.read-byte
     super TYPE
 
-  variable_header -> ByteArray:
-    return Packet.encode_uint16 packet_id
+  variable-header -> ByteArray:
+    return Packet.encode-uint16 packet-id
 
   payload -> ByteArray: return ByteArray qos.size: qos[it]
 
@@ -449,45 +449,45 @@ class UnsubscribePacket extends Packet:
   static TYPE ::= 10
 
   topics/List/*<string>*/
-  packet_id/int
+  packet-id/int
 
   constructor.deserialize_ reader/reader.BufferedReader size/int:
     consumed := 0
-    packet_id = Packet.decode_uint16 reader
+    packet-id = Packet.decode-uint16 reader
     consumed += 2
     topics = []
     while consumed < size:
-      topic := Packet.decode_string reader
+      topic := Packet.decode-string reader
       consumed += 2 + topic.size
       topics.add topic
     super TYPE --flags=0b0010
 
-  constructor .topics --.packet_id:
+  constructor .topics --.packet-id:
     super TYPE --flags=0b0010
 
-  variable_header -> ByteArray:
-    return Packet.encode_uint16 packet_id
+  variable-header -> ByteArray:
+    return Packet.encode-uint16 packet-id
 
   payload -> ByteArray:
     buffer := bytes.Buffer
-    topics.do: | topic_qos/string |
-      Packet.encode_string buffer topic_qos
+    topics.do: | topic-qos/string |
+      Packet.encode-string buffer topic-qos
     return buffer.bytes
 
 class UnsubAckPacket extends Packet:
   static TYPE ::= 11
 
-  packet_id /int
+  packet-id /int
 
-  constructor --.packet_id:
+  constructor --.packet-id:
     super TYPE
 
   constructor.deserialize_ reader/reader.BufferedReader:
-    packet_id = Packet.decode_uint16 reader
+    packet-id = Packet.decode-uint16 reader
     super TYPE
 
-  variable_header -> ByteArray:
-    return Packet.encode_uint16 packet_id
+  variable-header -> ByteArray:
+    return Packet.encode-uint16 packet-id
 
   payload -> ByteArray: return #[]
 
@@ -500,7 +500,7 @@ class PingReqPacket extends Packet:
   constructor.deserialize_ reader/reader.BufferedReader:
     super TYPE
 
-  variable_header -> ByteArray:
+  variable-header -> ByteArray:
     return #[]
 
   payload -> ByteArray:
@@ -515,7 +515,7 @@ class PingRespPacket extends Packet:
   constructor.deserialize_ reader/reader.BufferedReader:
     super TYPE
 
-  variable_header -> ByteArray:
+  variable-header -> ByteArray:
     return #[]
 
   payload -> ByteArray:
@@ -530,7 +530,7 @@ class DisconnectPacket extends Packet:
   constructor.deserialize_ reader/reader.BufferedReader:
     super TYPE
 
-  variable_header -> ByteArray:
+  variable-header -> ByteArray:
     return #[]
 
   payload -> ByteArray:
