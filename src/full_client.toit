@@ -249,7 +249,7 @@ monitor WaitSignal_:
 /**
 A base class for reconnection strategies.
 */
-abstract class DefaultReconnectionStrategyBase implements ReconnectionStrategy:
+abstract class ReconnectionStrategyBase implements ReconnectionStrategy:
   static DEFAULT_RECEIVE_CONNECT_TIMEOUT /Duration ::= Duration --s=5
   static DEFAULT_ATTEMPT_DELAYS /List ::= [
     Duration --s=1,
@@ -354,18 +354,44 @@ abstract class DefaultReconnectionStrategyBase implements ReconnectionStrategy:
     closed_signal_.trigger
 
 /**
-The default reconnection strategy for clients that are connected with the
-  clean session bit.
-
-Since the broker will drop the session information this strategy won't reconnect
-  when the connection breaks after it has connected. However, it will potentially
-  try to connect multiple times for the initial connection.
+Deprecated. Use $ReconnectionStrategyBase instead.
 */
-class DefaultCleanSessionReconnectionStrategy extends DefaultReconnectionStrategyBase:
+abstract class DefaultReconnectionStrategyBase extends ReconnectionStrategyBase:
+  /** Deprecated. Use $ReconnectionStrategyBase.DEFAULT_RECEIVE_CONNECT_TIMEOUT instead. */
+  static DEFAULT_RECEIVE_CONNECT_TIMEOUT ::= ReconnectionStrategyBase.DEFAULT_RECEIVE_CONNECT_TIMEOUT
+  /** Deprecated. Use $ReconnectionStrategyBase.DEFAULT_ATTEMPT_DELAYS instead. */
+  static DEFAULT_ATTEMPT_DELAYS ::= ReconnectionStrategyBase.DEFAULT_ATTEMPT_DELAYS
 
   constructor
+      --receive_connect_timeout /Duration = ReconnectionStrategyBase.DEFAULT_RECEIVE_CONNECT_TIMEOUT
+      --delay_lambda /Lambda? = null
+      --attempt_delays /List? /*Duration*/ = (delay_lambda ? null : ReconnectionStrategyBase.DEFAULT_ATTEMPT_DELAYS)
+      --logger/log.Logger?=log.default:
+    super
+        --receive_connect_timeout=receive_connect_timeout
+        --delay_lambda=delay_lambda
+        --attempt_delays=attempt_delays
+        --logger=logger
+
+/**
+A reconnection strategy that does not attempt to reconnect when the connection
+  is interrupted.
+
+This strategy will potentially try to connect multiple times for the initial connection.
+*/
+class NoReconnectionStrategy extends ReconnectionStrategyBase:
+
+  /**
+  Constructs a new reconnection strategy.
+
+  See $ReconnectionStrategyBase for the meaning of the parameters.
+
+  The $delay_lambda and $attempt-delays parameters are only used for the initial connection
+    attempt.
+  */
+  constructor
       --logger/log.Logger=log.default
-      --receive_connect_timeout /Duration = DefaultReconnectionStrategyBase.DEFAULT_RECEIVE_CONNECT_TIMEOUT
+      --receive_connect_timeout /Duration = ReconnectionStrategyBase.DEFAULT_RECEIVE_CONNECT_TIMEOUT
       --delay_lambda /Lambda? = null
       --attempt_delays /List? /*Duration*/ = null:
     super --logger=logger
@@ -381,31 +407,54 @@ class DefaultCleanSessionReconnectionStrategy extends DefaultReconnectionStrateg
       [--send_connect]
       [--receive_connect_ack]
       [--disconnect]:
-    // The clean session does not reconnect.
-    if not is_initial_connection: throw "INVALID_STATE"
+    // No reconnect.
+    if not is_initial_connection: throw "NO RECONNECT STRATEGY"
     session_exists := do_connect transport
         --reuse_connection = is_initial_connection
         --reconnect_transport = reconnect_transport
         --disconnect_transport = disconnect_transport
         --send_connect = send_connect
         --receive_connect_ack = receive_connect_ack
-    if session_exists:
-      // A clean-session strategy must not find an existing session.
-      throw "INVALID_STATE"
 
   should_try_reconnect transport/ActivityMonitoringTransport -> bool:
     return false
 
 /**
-The default reconnection strategy for clients that are connected without the
+The default reconnection strategy for clients that are connected with the
   clean session bit.
+
+Since the broker will drop the session information this strategy won't reconnect
+  when the connection breaks after it has connected. However, it will potentially
+  try to connect multiple times for the initial connection.
+
+Deprecated. Use $NoReconnectionStrategy instead.
+*/
+class DefaultCleanSessionReconnectionStrategy extends NoReconnectionStrategy:
+  constructor
+      --logger/log.Logger=log.default
+      --receive_connect_timeout /Duration = ReconnectionStrategyBase.DEFAULT_RECEIVE_CONNECT_TIMEOUT
+      --delay_lambda /Lambda? = null
+      --attempt_delays /List? /*Duration*/ = null:
+    super --logger=logger
+        --receive_connect_timeout=receive_connect_timeout
+        --delay_lambda=delay_lambda
+        --attempt_delays=attempt_delays
+
+/**
+The reconnection strategy that tries to reconnect when the connection is
+  interrupted.
 
 If the connection drops, the client tries to reconnect potentially multiple times.
 */
-class DefaultSessionReconnectionStrategy extends DefaultReconnectionStrategyBase:
+class RetryReconnectionStrategy extends ReconnectionStrategyBase:
+  /**
+  Constructs a new reconnection strategy.
+
+  See $ReconnectionStrategyBase for the meaning of the parameters.
+  */
   constructor
       --logger/log.Logger=log.default
-      --receive_connect_timeout /Duration = DefaultReconnectionStrategyBase.DEFAULT_RECEIVE_CONNECT_TIMEOUT
+      --receive_connect_timeout /Duration = ReconnectionStrategyBase.DEFAULT_RECEIVE_CONNECT_TIMEOUT
       --delay_lambda /Lambda? = null
       --attempt_delays /List? = null:
     super --logger=logger
@@ -439,6 +488,20 @@ class DefaultSessionReconnectionStrategy extends DefaultReconnectionStrategyBase
     return transport.supports_reconnect
 
 /**
+Deprecated. Use $RetryReconnectionStrategy instead.
+*/
+class DefaultSessionReconnectionStrategy extends RetryReconnectionStrategy:
+  constructor
+      --logger/log.Logger=log.default
+      --receive_connect_timeout /Duration = ReconnectionStrategyBase.DEFAULT_RECEIVE_CONNECT_TIMEOUT
+      --delay_lambda /Lambda? = null
+      --attempt_delays /List? = null:
+    super --logger=logger
+        --receive_connect_timeout=receive_connect_timeout
+        --delay_lambda=delay_lambda
+        --attempt_delays=attempt_delays
+
+/**
 A reconnection strategy that keeps reconnecting.
 
 This strategy also ignores whether the broker did or did not have a session for
@@ -461,7 +524,7 @@ Note that this can also happen to clients that don't set the client-session flag
   broker crashed, or a client with the same ID connected in the meantime with a
   clean-session flag.
 */
-class TenaciousReconnectionStrategy extends DefaultReconnectionStrategyBase:
+class TenaciousReconnectionStrategy extends ReconnectionStrategyBase:
   /**
   Creates a new tenacious reconnection strategy.
 
@@ -475,7 +538,7 @@ class TenaciousReconnectionStrategy extends DefaultReconnectionStrategyBase:
   */
   constructor
       --logger/log.Logger=log.default
-      --receive_connect_timeout /Duration = DefaultReconnectionStrategyBase.DEFAULT_RECEIVE_CONNECT_TIMEOUT
+      --receive_connect_timeout /Duration = ReconnectionStrategyBase.DEFAULT_RECEIVE_CONNECT_TIMEOUT
       --delay_lambda /Lambda:
     super --logger=logger
         --receive_connect_timeout=receive_connect_timeout
@@ -815,10 +878,10 @@ class FullClient:
     if reconnection_strategy:
       reconnection_strategy_ = reconnection_strategy
     else if options.clean_session:
-      reconnection_strategy_ = DefaultCleanSessionReconnectionStrategy
+      reconnection_strategy_ = NoReconnectionStrategy
           --logger=logger_.with_name "reconnect"
     else:
-      reconnection_strategy_ = DefaultSessionReconnectionStrategy
+      reconnection_strategy_ = RetryReconnectionStrategy
           --logger=logger_.with_name "reconnect"
 
     session_ = Session_ options persistence_store
