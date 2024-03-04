@@ -339,7 +339,7 @@ abstract class ReconnectionStrategyBase implements ReconnectionStrategy:
 
     unreachable
 
-  abstract connect -> bool
+  abstract connect -> bool?
       transport/ActivityMonitoringTransport
       --is-initial-connection /bool
       [--reconnect-transport]
