@@ -217,7 +217,7 @@ class Session_:
       waiting-for-ack_.remove id
       return
 
-    logger_.warn "Unhandled packet $(Packet.debug-string_ packet)"
+    logger_.warn "unhandled packet $(Packet.debug-string_ packet)"
 
   subscribe packet/SubscribePacket:
     result-qos := []
