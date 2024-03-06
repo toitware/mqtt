@@ -313,7 +313,7 @@ abstract class ReconnectionStrategyBase implements ReconnectionStrategy:
           if attempt-counter == 0:
             // In the first iteration we try to connect without delay.
             if not reuse-connection:
-              logger_.debug "Attempting to (re)connect"
+              logger_.debug "attempting to (re)connect"
               reconnect-transport.call
           else:
             sleep-duration/Duration := ?
@@ -324,18 +324,18 @@ abstract class ReconnectionStrategyBase implements ReconnectionStrategy:
             disconnect-transport.call
             closed-signal_.wait --timeout=sleep-duration
             if is-closed: return null
-            logger_.debug "Attempting to (re)connect"
+            logger_.debug "attempting to (re)connect"
             reconnect-transport.call
 
           send-connect.call
-          logger_.debug "Connected to broker"
+          logger_.debug "connected to broker"
           return with-timeout receive-connect-timeout_:
             result := receive-connect-ack.call
-            logger_.debug "Connection established"
+            logger_.debug "connection established"
             result
       finally: | is-exception _ |
         if is-exception:
-          logger_.debug "(Re)connection attempt failed"
+          logger_.debug "attempting to (re)connect failed"
 
     unreachable
 
