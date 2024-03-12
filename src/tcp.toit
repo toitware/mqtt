@@ -2,12 +2,11 @@
 // Use of this source code is governed by an MIT-style license that can be
 // found in the LICENSE file.
 
+import io
+import monitor
 import net
 import net.tcp
-import writer
-import reader
 import tls
-import monitor
 
 import .broker
 import .transport
@@ -21,9 +20,11 @@ Supports reconnecting to the same server if constructed with the connection info
 */
 class TcpTransport implements Transport BrokerTransport:
   socket_ /tcp.Socket? := null
+  socket-reader_ /io.Reader? := null
+  socket-writer_ /io.Writer? := null
 
   constructor socket/tcp.Socket:
-    socket_ = socket
+    set-socket_ socket
 
   /** Deprecated. Use $(constructor --net-open --host) instead. */
   constructor network/net.Interface --host/string --port/int=1883:
@@ -51,17 +52,25 @@ class TcpTransport implements Transport BrokerTransport:
       --server-name=server-name
       --certificate=certificate
 
-  constructor.from-subclass_ .socket_:
+  constructor.from-subclass_:
+
+  set-socket_ socket/tcp.Socket?:
+    socket_ = socket
+    if socket_:
+      socket-reader_ = socket_.in
+      socket-writer_ = socket_.out
 
   write bytes/ByteArray -> int:
-    return socket_.write bytes
+    return socket-writer_.try-write bytes 0 bytes.size
 
   read -> ByteArray?:
-    return socket_.read
+    return socket-reader_.read
 
   close:
     if socket_: socket_.close
     socket_ = null
+    socket-reader_ = null
+    socket-writer_ = null
 
   is-closed -> bool:
     return socket_ == null
@@ -90,14 +99,8 @@ class ReconnectingTransport_ extends TcpTransport:
     host_ = host
     port_ = port
     open_ = net-open
-    super.from-subclass_ null
+    super.from-subclass_
     reconnect
-
-  write bytes/ByteArray -> int:
-    return socket_.write bytes
-
-  read -> ByteArray?:
-    return socket_.read
 
   close -> none:
     super
@@ -126,7 +129,7 @@ class ReconnectingTransport_ extends TcpTransport:
 
       // Set the new socket_ at the very end. This way we will try to
       // reconnect again if we are interrupted by a timeout.
-      socket_ = socket
+      set-socket_ socket
 
   new-connection_ -> tcp.Socket:
     return network_.tcp-connect host_ port_
