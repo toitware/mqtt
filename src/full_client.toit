@@ -2,10 +2,9 @@
 // Use of this source code is governed by an MIT-style license that can be
 // found in the LICENSE file.
 
+import io
 import monitor
 import log
-import reader
-import writer show Writer
 
 import .session-options
 import .last-will
@@ -13,6 +12,7 @@ import .packets
 import .tcp  // For toitdoc.
 import .topic-qos
 import .transport
+import .utils_
 
 CLIENT-CLOSED-EXCEPTION ::= "CLIENT_CLOSED"
 
@@ -58,7 +58,6 @@ class ActivityChecker_:
         duration := check
         sleep duration
 
-
 /**
 A connection to the broker.
 
@@ -85,9 +84,9 @@ class Connection_:
 
   state_ / int := STATE-ALIVE_
 
-  transport_ / ActivityMonitoringTransport
-  reader_ /reader.BufferedReader
-  writer_ /Writer
+  transport_ / ActivityMonitoringTransport_
+  reader_ /io.Reader
+  writer_ /io.Writer
   writing_ /monitor.Mutex ::= monitor.Mutex
   is-writing_ /bool := false
 
@@ -102,11 +101,10 @@ class Connection_:
 
   /** Constructs a new connection. */
   constructor .transport_ --keep-alive/Duration? --logger/log.Logger:
-    reader_ = reader.BufferedReader transport_
-    writer_ = Writer transport_
+    reader_ = TransportReader_ transport_
+    writer_ = TransportWriter_ transport_
     keep-alive-duration_ = keep-alive
     logger_ = logger
-
 
   is-alive -> bool: return state_ == STATE-ALIVE_
   is-closed -> bool: return state_ == STATE-CLOSED_
@@ -215,7 +213,7 @@ interface ReconnectionStrategy:
   The $is-initial-connection is true if this is the first time the client connects to the broker.
   */
   connect -> bool?
-      transport/ActivityMonitoringTransport
+      transport/ActivityMonitoringTransport_
       --is-initial-connection /bool
       [--reconnect-transport]
       [--disconnect-transport]
@@ -224,7 +222,7 @@ interface ReconnectionStrategy:
       [--disconnect]
 
   /** Whether the client should even try to reconnect. */
-  should-try-reconnect transport/ActivityMonitoringTransport -> bool
+  should-try-reconnect transport/ActivityMonitoringTransport_ -> bool
 
   /** Whether the strategy is closed. */
   is-closed -> bool
@@ -291,7 +289,7 @@ abstract class ReconnectionStrategyBase implements ReconnectionStrategy:
   Returns whether the broker had a session for this client, otherwise.
   */
   do-connect -> bool?
-      transport/ActivityMonitoringTransport
+      transport/ActivityMonitoringTransport_
       --reuse-connection/bool=false
       [--reconnect-transport]
       [--disconnect-transport]
@@ -340,7 +338,7 @@ abstract class ReconnectionStrategyBase implements ReconnectionStrategy:
     unreachable
 
   abstract connect -> bool?
-      transport/ActivityMonitoringTransport
+      transport/ActivityMonitoringTransport_
       --is-initial-connection /bool
       [--reconnect-transport]
       [--disconnect-transport]
@@ -348,7 +346,7 @@ abstract class ReconnectionStrategyBase implements ReconnectionStrategy:
       [--receive-connect-ack]
       [--disconnect]
 
-  abstract should-try-reconnect transport/ActivityMonitoringTransport -> bool
+  abstract should-try-reconnect transport/ActivityMonitoringTransport_ -> bool
 
   is-closed -> bool:
     return is-closed_
@@ -404,7 +402,7 @@ class NoReconnectionStrategy extends ReconnectionStrategyBase:
         --attempt-delays=attempt-delays
 
   connect -> bool?
-      transport/ActivityMonitoringTransport
+      transport/ActivityMonitoringTransport_
       --is-initial-connection /bool
       [--reconnect-transport]
       [--disconnect-transport]
@@ -421,7 +419,7 @@ class NoReconnectionStrategy extends ReconnectionStrategyBase:
         --send-connect = send-connect
         --receive-connect-ack = receive-connect-ack
 
-  should-try-reconnect transport/ActivityMonitoringTransport -> bool:
+  should-try-reconnect transport/ActivityMonitoringTransport_ -> bool:
     return false
 
 /**
@@ -468,7 +466,7 @@ class RetryReconnectionStrategy extends ReconnectionStrategyBase:
         --attempt-delays=attempt-delays
 
   connect -> bool?
-      transport/ActivityMonitoringTransport
+      transport/ActivityMonitoringTransport_
       --is-initial-connection /bool
       [--reconnect-transport]
       [--disconnect-transport]
@@ -482,7 +480,7 @@ class RetryReconnectionStrategy extends ReconnectionStrategyBase:
         --send-connect = send-connect
         --receive-connect-ack = receive-connect-ack
 
-  should-try-reconnect transport/ActivityMonitoringTransport -> bool:
+  should-try-reconnect transport/ActivityMonitoringTransport_ -> bool:
     return transport.supports-reconnect
 
 /**
@@ -543,7 +541,7 @@ class TenaciousReconnectionStrategy extends ReconnectionStrategyBase:
         --delay-lambda=delay-lambda
 
   connect -> bool?
-      transport/ActivityMonitoringTransport
+      transport/ActivityMonitoringTransport_
       --is-initial-connection /bool
       [--reconnect-transport]
       [--disconnect-transport]
@@ -557,7 +555,7 @@ class TenaciousReconnectionStrategy extends ReconnectionStrategyBase:
         --send-connect = send-connect
         --receive-connect-ack = receive-connect-ack
 
-  should-try-reconnect transport/ActivityMonitoringTransport -> bool:
+  should-try-reconnect transport/ActivityMonitoringTransport_ -> bool:
     return transport.supports-reconnect
 
 /**
@@ -800,7 +798,7 @@ class FullClient:
 
   state_ /int := STATE-CREATED_
 
-  transport_ /ActivityMonitoringTransport := ?
+  transport_ /ActivityMonitoringTransport_ := ?
   logger_ /log.Logger
 
   session_ /Session_? := null
@@ -847,7 +845,7 @@ class FullClient:
   constructor
       --transport /Transport
       --logger /log.Logger = log.default:
-    transport_ = ActivityMonitoringTransport.private_ transport
+    transport_ = ActivityMonitoringTransport_.private_ transport
     logger_ = logger
 
   /**

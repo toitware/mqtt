@@ -2,9 +2,8 @@
 // Use of this source code is governed by a Zero-Clause BSD license that can
 // be found in the tests/LICENSE file.
 
-import bytes
 import expect show *
-import reader
+import io
 
 import mqtt.packets as mqtt
 import mqtt.last-will as mqtt
@@ -19,7 +18,7 @@ PACKET-ID-TESTS ::= [
 
 test-roundtrip packet/mqtt.Packet -> mqtt.Packet:
   serialized := packet.serialize
-  reader := reader.BufferedReader (bytes.Reader serialized)
+  reader := io.Reader serialized
   deserialized := mqtt.Packet.deserialize reader
   serialized2 := deserialized.serialize
   expect-equals serialized serialized2
