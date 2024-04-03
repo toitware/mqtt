@@ -45,7 +45,7 @@ class TimeoutReader_ extends io.Reader:
 
   constructor .transport_:
 
-  consume_ -> ByteArray?:
+  read_ -> ByteArray?:
     if timeout_:
       with-timeout timeout_: return transport_.read
     return transport_.read

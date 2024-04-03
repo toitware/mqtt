@@ -130,5 +130,5 @@ class TransportReader_ extends io.Reader:
 
   constructor .transport_:
 
-  consume_ -> ByteArray?:
+  read_ -> ByteArray?:
     return transport_.read

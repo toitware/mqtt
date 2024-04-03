@@ -125,7 +125,7 @@ class InterceptingReader_ extends io.Reader:
 
   constructor .transport_:
 
-  consume_ -> ByteArray?:
+  read_ -> ByteArray?:
     bytes := transport_.read
     intercepted.add bytes
     return bytes

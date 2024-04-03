@@ -2,7 +2,6 @@
 // Use of this source code is governed by an MIT-style license that can be
 // found in the LICENSE file.
 
-import binary
 import io
 import reader as old-reader
 
@@ -91,7 +90,7 @@ abstract class Packet:
 
   static encode-uint16 value/int -> ByteArray:
     result := ByteArray 2
-    binary.BIG-ENDIAN.put-uint16 result 0 value
+    io.BIG-ENDIAN.put-uint16 result 0 value
     return result
 
   static encode-uint16 buffer/io.Buffer value/int:
@@ -103,7 +102,7 @@ abstract class Packet:
 
   static decode-uint16 reader/io.Reader -> int:
     length-bytes := reader.read-bytes 2
-    return binary.BIG-ENDIAN.uint16 length-bytes 0
+    return io.BIG-ENDIAN.uint16 length-bytes 0
 
   static debug-string_ packet/Packet -> string:
     if packet is ConnectPacket:
@@ -214,7 +213,7 @@ class ConnectPacket extends Packet:
 
 
     data := #[0, 4, 'M', 'Q', 'T', 'T', 4, connect-flags, 0, 0]
-    binary.BIG-ENDIAN.put-uint16 data 8 keep-alive.in-s
+    io.BIG-ENDIAN.put-uint16 data 8 keep-alive.in-s
     return data
 
   payload -> ByteArray:
@@ -351,7 +350,7 @@ class PublishPacketReader_ extends io.Reader implements old-reader.SizedReader:
   size -> int:
     return content-size
 
-  consume_ -> ByteArray?:
+  read_ -> ByteArray?:
     remaining := remaining_
     assert: remaining != null  // Should have called $stream_ already.
     if remaining == 0: return null
