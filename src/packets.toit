@@ -2,9 +2,8 @@
 // Use of this source code is governed by an MIT-style license that can be
 // found in the LICENSE file.
 
-import bytes
-import binary
-import reader
+import io
+import reader as old-reader
 
 import .last-will
 import .topic-qos
@@ -15,8 +14,8 @@ abstract class Packet:
 
   constructor .type --.flags=0:
 
-  static deserialize reader/reader.BufferedReader -> Packet?:
-    if not reader.can-ensure 1: return null
+  static deserialize reader/io.Reader -> Packet?:
+    if not reader.try-ensure-buffered 1: return null
     byte1 := reader.read-byte
     kind := byte1 >> 4
     flags := byte1 & 0xf
@@ -61,7 +60,7 @@ abstract class Packet:
     // drained when we're done processing a packet.
 
   serialize -> ByteArray:
-    buffer := bytes.Buffer
+    buffer := io.Buffer
     buffer.write-byte type << 4 | flags
 
     header := variable-header
@@ -74,7 +73,7 @@ abstract class Packet:
 
     return buffer.bytes
 
-  static encode-length buffer/bytes.Buffer length/int:
+  static encode-length buffer/io.Buffer length/int:
     if length == 0:
       buffer.write-byte 0
       return
@@ -85,24 +84,25 @@ abstract class Packet:
       if length > 0: byte |= 0x80
       buffer.write-byte byte
 
-  static encode-string buffer/bytes.Buffer str/string:
-    length := ByteArray 2
-    binary.BIG-ENDIAN.put-uint16 length 0 str.size
-    buffer.write length
+  static encode-string buffer/io.Buffer str/string:
+    buffer.big-endian.write-uint16 str.size
     buffer.write str
 
   static encode-uint16 value/int -> ByteArray:
     result := ByteArray 2
-    binary.BIG-ENDIAN.put-uint16 result 0 value
+    io.BIG-ENDIAN.put-uint16 result 0 value
     return result
 
-  static decode-string reader/reader.BufferedReader -> string:
+  static encode-uint16 buffer/io.Buffer value/int:
+    buffer.big-endian.write-uint16 value
+
+  static decode-string reader/io.Reader -> string:
     length := decode-uint16 reader
     return reader.read-string length
 
-  static decode-uint16 reader/reader.BufferedReader -> int:
+  static decode-uint16 reader/io.Reader -> int:
     length-bytes := reader.read-bytes 2
-    return binary.BIG-ENDIAN.uint16 length-bytes 0
+    return io.BIG-ENDIAN.uint16 length-bytes 0
 
   static debug-string_ packet/Packet -> string:
     if packet is ConnectPacket:
@@ -171,7 +171,7 @@ class ConnectPacket extends Packet:
   constructor .client-id --.clean-session --.username --.password --.keep-alive --.last-will:
     super TYPE
 
-  constructor.deserialize_ reader/reader.BufferedReader:
+  constructor.deserialize_ reader/io.Reader:
     protocol := Packet.decode-string reader
     if protocol != "MQTT": throw "UNEQUAL PROTOCOL $protocol"
     level := reader.read-byte
@@ -213,15 +213,15 @@ class ConnectPacket extends Packet:
 
 
     data := #[0, 4, 'M', 'Q', 'T', 'T', 4, connect-flags, 0, 0]
-    binary.BIG-ENDIAN.put-uint16 data 8 keep-alive.in-s
+    io.BIG-ENDIAN.put-uint16 data 8 keep-alive.in-s
     return data
 
   payload -> ByteArray:
-    buffer := bytes.Buffer
+    buffer := io.Buffer
     Packet.encode-string buffer client-id
     if last-will:
       Packet.encode-string buffer last-will.topic
-      buffer.write (Packet.encode-uint16 last-will.payload.size)
+      Packet.encode-uint16 buffer last-will.payload.size
       buffer.write last-will.payload
 
     if username: Packet.encode-string buffer username
@@ -243,7 +243,7 @@ class ConnAckPacket extends Packet:
   constructor --.return-code=0 --.session-present=false:
     super TYPE
 
-  constructor.deserialize_ reader/reader.BufferedReader:
+  constructor.deserialize_ reader/io.Reader:
     data := reader.read-bytes 2
     session-present = data[0] & 0x01 != 0
     return-code = data[1]
@@ -264,7 +264,7 @@ class PublishPacket extends Packet:
   reader_ /PublishPacketReader_? := ?
   payload_ /ByteArray? := ?
 
-  constructor.deserialize_ reader/reader.BufferedReader size/int flags/int:
+  constructor.deserialize_ reader/io.Reader size/int flags/int:
     retain := flags & 0b0001 != 0
     qos := (flags & 0b0110) >> 1
     duplicate := flags & 0b1000 != 0
@@ -294,7 +294,7 @@ class PublishPacket extends Packet:
     reader_ = null
     return payload
 
-  payload-stream -> reader.SizedReader:
+  payload-stream -> io.Reader:
     if payload_: throw "Already read payload"
     return reader_.stream_
 
@@ -304,9 +304,9 @@ class PublishPacket extends Packet:
     reader_ = null
 
   variable-header -> ByteArray:
-    buffer := bytes.Buffer
+    buffer := io.Buffer
     Packet.encode-string buffer topic
-    if packet-id: buffer.write (Packet.encode-uint16 packet-id)
+    if packet-id: Packet.encode-uint16 buffer packet-id
     return buffer.bytes
 
   retain -> bool: return flags & 0b1 != 0
@@ -339,14 +339,18 @@ class PublishPacket extends Packet:
         --packet-id = new-packet-id
         --duplicate = duplicate != null ? duplicate : this.duplicate
 
-class PublishPacketReader_ implements reader.SizedReader:
-  reader_ /reader.BufferedReader
-  size /int
+class PublishPacketReader_ extends io.Reader implements old-reader.SizedReader:
+  reader_ /io.Reader
+  content-size /int
   remaining_ /int? := null
 
-  constructor .reader_ .size:
+  constructor .reader_ .content-size:
 
-  read -> ByteArray?:
+  /** Deprecated. Use $content-size instead. */
+  size -> int:
+    return content-size
+
+  read_ -> ByteArray?:
     remaining := remaining_
     assert: remaining != null  // Should have called $stream_ already.
     if remaining == 0: return null
@@ -354,21 +358,21 @@ class PublishPacketReader_ implements reader.SizedReader:
     if bytes: remaining_ = remaining - bytes.size
     return bytes
 
-  stream_ -> reader.SizedReader:
-    if remaining_ == null: remaining_ = size
+  stream_ -> io.Reader:
+    if remaining_ == null: remaining_ = content-size
     return this
 
   drain_ -> none:
     remaining := remaining_
     if remaining == 0: return
-    reader_.skip (remaining or size)
+    reader_.skip (remaining or content-size)
     remaining_ = 0
 
   read-payload_ -> ByteArray?:
     // If we already started streaming from the underlying reader,
     // we cannot produce a payload.
     if remaining_ != null: return null
-    payload := reader_.read-bytes size
+    payload := reader_.read-bytes content-size
     remaining_ = 0
     return payload
 
@@ -380,7 +384,7 @@ class PubAckPacket extends Packet:
   constructor --.packet-id:
     super TYPE
 
-  constructor.deserialize_ reader/reader.BufferedReader:
+  constructor.deserialize_ reader/io.Reader:
     packet-id = Packet.decode-uint16 reader
     super TYPE
 
@@ -398,7 +402,7 @@ class SubscribePacket extends Packet:
   constructor .topics --.packet-id:
     super TYPE --flags=0b0010
 
-  constructor.deserialize_ reader/reader.BufferedReader size/int:
+  constructor.deserialize_ reader/io.Reader size/int:
     consumed := 0
     packet-id = Packet.decode-uint16 reader
     consumed += 2
@@ -416,7 +420,7 @@ class SubscribePacket extends Packet:
     return Packet.encode-uint16 packet-id
 
   payload -> ByteArray:
-    buffer := bytes.Buffer
+    buffer := io.Buffer
     topics.do: | topic-qos/TopicQos |
       Packet.encode-string buffer topic-qos.topic
       buffer.write-byte topic-qos.max-qos
@@ -434,7 +438,7 @@ class SubAckPacket extends Packet:
   constructor --.packet-id --.qos:
     super TYPE
 
-  constructor.deserialize_ reader/reader.BufferedReader size/int:
+  constructor.deserialize_ reader/io.Reader size/int:
     packet-id = Packet.decode-uint16 reader
     size -= 2
     qos = List size: reader.read-byte
@@ -451,7 +455,7 @@ class UnsubscribePacket extends Packet:
   topics/List/*<string>*/
   packet-id/int
 
-  constructor.deserialize_ reader/reader.BufferedReader size/int:
+  constructor.deserialize_ reader/io.Reader size/int:
     consumed := 0
     packet-id = Packet.decode-uint16 reader
     consumed += 2
@@ -469,7 +473,7 @@ class UnsubscribePacket extends Packet:
     return Packet.encode-uint16 packet-id
 
   payload -> ByteArray:
-    buffer := bytes.Buffer
+    buffer := io.Buffer
     topics.do: | topic-qos/string |
       Packet.encode-string buffer topic-qos
     return buffer.bytes
@@ -482,7 +486,7 @@ class UnsubAckPacket extends Packet:
   constructor --.packet-id:
     super TYPE
 
-  constructor.deserialize_ reader/reader.BufferedReader:
+  constructor.deserialize_ reader/io.Reader:
     packet-id = Packet.decode-uint16 reader
     super TYPE
 
@@ -497,7 +501,7 @@ class PingReqPacket extends Packet:
   constructor:
     super TYPE
 
-  constructor.deserialize_ reader/reader.BufferedReader:
+  constructor.deserialize_ reader/io.Reader:
     super TYPE
 
   variable-header -> ByteArray:
@@ -512,7 +516,7 @@ class PingRespPacket extends Packet:
   constructor:
     super TYPE
 
-  constructor.deserialize_ reader/reader.BufferedReader:
+  constructor.deserialize_ reader/io.Reader:
     super TYPE
 
   variable-header -> ByteArray:
@@ -527,7 +531,7 @@ class DisconnectPacket extends Packet:
   constructor:
     super TYPE
 
-  constructor.deserialize_ reader/reader.BufferedReader:
+  constructor.deserialize_ reader/io.Reader:
     super TYPE
 
   variable-header -> ByteArray:

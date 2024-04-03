@@ -2,16 +2,15 @@
 // Use of this source code is governed by an MIT-style license that can be
 // found in the LICENSE file.
 
-/**
-A simple transport for testing.
-*/
-
-import bytes
+import io
 import mqtt.transport as mqtt
 import mqtt.broker as broker
 import mqtt.packets as mqtt
 import monitor
-import reader
+
+/**
+Transports for testing.
+*/
 
 class TestClientTransport implements mqtt.Transport:
   server_ /TestServerTransport
@@ -120,32 +119,14 @@ monitor TestTransportPipe:
   is-closed_ -> bool:
     return closed-from-client_ or closed-from-broker_
 
-monitor Pipe_ implements reader.Reader:
-  data_ /any := null
-  is-closed_ /bool := false
-
-  read -> ByteArray?:
-    await: data_ or is-closed_
-    if is-closed_: return null
-    result := data_
-    data_ = null
-    return result
-
-  close:
-    is-closed_ = true
-
-  write bytes/ByteArray -> none:
-    await: not data_
-    data_ = bytes
-
-class InterceptingReader_ implements reader.Reader:
-  wrapped_ /reader.Reader
+class InterceptingReader_ extends io.Reader:
+  transport_ /mqtt.Transport
   intercepted /Deque := Deque
 
-  constructor .wrapped_:
+  constructor .transport_:
 
-  read -> ByteArray?:
-    bytes := wrapped_.read
+  read_ -> ByteArray?:
+    bytes := transport_.read
     intercepted.add bytes
     return bytes
 
@@ -191,8 +172,7 @@ class TestTransport implements mqtt.Transport:
         // need to be sent.
         pending /ByteArray? := null
         intercepting-reader := InterceptingReader_ wrapped_
-        buffered := reader.BufferedReader intercepting-reader
-        while packet := mqtt.Packet.deserialize buffered:
+        while packet := mqtt.Packet.deserialize intercepting-reader:
           if read-filter_:
             packet = read-filter_.call packet
           if not packet: continue
@@ -221,8 +201,8 @@ class TestTransport implements mqtt.Transport:
       read-channel_.send exception-or-null
 
   write byte-array/ByteArray -> int:
-    reader := reader.BufferedReader (bytes.Reader byte-array)
     if remaining-to-write_ == 0:
+      reader := io.Reader byte-array
       // We assume that the first attempt to write bytes represent a full packet.
       packet := mqtt.Packet.deserialize reader
       if write-filter_:

@@ -2,19 +2,20 @@
 // Use of this source code is governed by an MIT-style license that can be
 // found in the LICENSE file.
 
+import io
 import .packets
-import reader
+import .utils_
 
 /**
 The backing transport for the MQTT client.
 */
-interface Transport implements reader.Reader:
+interface Transport:
   /**
   Writes to the transport.
 
   Returns the number of bytes written.
   */
-  write bytes/ByteArray -> int
+  write data/ByteArray -> int
 
   /**
   Receives bytes from the peer.
@@ -60,6 +61,7 @@ interface Transport implements reader.Reader:
   */
   is-closed -> bool
 
+
 /**
 A transport that monitors activity on a wrapped transport.
 
@@ -67,7 +69,7 @@ The MQTT library automatically wraps transports in actvity-monitoring
   transports. Users of the library should never need to instantiate this
   class themselves.
 */
-class ActivityMonitoringTransport implements Transport:
+class ActivityMonitoringTransport_ implements Transport:
   wrapped-transport_ / Transport
 
   is-writing /bool := false
@@ -114,3 +116,19 @@ class ActivityMonitoringTransport implements Transport:
 
   is-closed -> bool:
     return wrapped-transport_.is-closed
+
+class TransportWriter_ extends io.Writer:
+  transport_ /Transport
+
+  constructor .transport_:
+
+  try-write_ data/io.Data from/int to/int -> int:
+    return transport_.write (io-data-to-byte-array_ data from to)
+
+class TransportReader_ extends io.Reader:
+  transport_ /Transport
+
+  constructor .transport_:
+
+  read_ -> ByteArray?:
+    return transport_.read

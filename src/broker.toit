@@ -8,19 +8,19 @@ A simple MQTT broker library.
 This implementation was created for testing, but is fully functional.
 */
 
-import monitor
-import reader
+import io
 import log
-import writer show Writer
+import monitor
 import .packets
 import .last-will
 import .topic-qos
 import .topic-tree
+import .utils_
 
 /**
 The transport interface used by the broker.
 */
-interface BrokerTransport implements reader.Reader:
+interface BrokerTransport:
   write bytes/ByteArray -> int
   read -> ByteArray?
   close -> none
@@ -39,30 +39,36 @@ interface ServerTransport:
 /**
 A reader that can timeout.
 */
-class TimeoutReader_ implements reader.Reader:
-  wrapped_ /reader.Reader
+class TimeoutReader_ extends io.Reader:
+  transport_ /BrokerTransport
   timeout_ /Duration? := null
 
-  constructor .wrapped_:
+  constructor .transport_:
 
-  read -> ByteArray?:
+  read_ -> ByteArray?:
     if timeout_:
-      with-timeout timeout_: return wrapped_.read
-    return wrapped_.read
+      with-timeout timeout_: return transport_.read
+    return transport_.read
 
   set-timeout timeout/Duration:
     timeout_ = timeout
 
-class Connection_:
+class TransportWriter_ extends io.Writer:
   transport_ /BrokerTransport
-  timeout-reader_ /TimeoutReader_
-  reader_ /reader.BufferedReader
-  writer_ /Writer
 
   constructor .transport_:
-    timeout-reader_ = TimeoutReader_ transport_
-    reader_ = reader.BufferedReader timeout-reader_
-    writer_ = Writer transport_
+
+  try-write_ data/io.Data from/int to/int -> int:
+    return transport_.write (io-data-to-byte-array_ data from to)
+
+class Connection_:
+  transport_ /BrokerTransport
+  reader_ /TimeoutReader_
+  writer_ /io.Writer
+
+  constructor .transport_:
+    reader_ = TimeoutReader_ transport_
+    writer_ = TransportWriter_ transport_
 
   read -> Packet?:
     return Packet.deserialize reader_
@@ -74,7 +80,7 @@ class Connection_:
     transport_.close
 
   set-read-timeout duration/Duration:
-    timeout-reader_.set-timeout duration
+    reader_.set-timeout duration
 
 
 monitor QueuedMessages_:
