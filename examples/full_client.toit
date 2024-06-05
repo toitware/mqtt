@@ -56,8 +56,8 @@ main:
   // ```
   client.when-running:
     client.subscribe "$TOPIC-PREFIX/#"
-    client.publish "$TOPIC-PREFIX/foo" "hello_world".to-byte-array
-    client.publish "$TOPIC-PREFIX/bar" "hello_world".to-byte-array --qos=1
+    client.publish "$TOPIC-PREFIX/foo" "hello_world"
+    client.publish "$TOPIC-PREFIX/bar" "hello_world" --qos=1
     client.unsubscribe "$TOPIC-PREFIX/#"
 
     // Wait for the confirmation that we have unsubscribed.

@@ -30,7 +30,7 @@ main:
   print "Connected to broker"
 
   4.repeat:
-    client.publish TOPIC "$it".to-byte-array
+    client.publish TOPIC "$it"
     print "Published '$it'"
     sleep --ms=1000
 
