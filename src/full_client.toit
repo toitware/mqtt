@@ -892,7 +892,7 @@ class FullClient:
   The client is not considered started until this method has been called.
   This method is blocking.
 
-  The given $on-packet block is called for each received packet.
+  The given $on-packet block is called for each received packet with a $Packet.
     The block should $ack the packet as soon as possible.
 
   The $when-running method executes a given block when this method is running.
@@ -1079,10 +1079,16 @@ class FullClient:
     store can use this information to avoid keeping the data in memory, or to clear data from
     the flash.
   */
-  publish topic/string payload/ByteArray --qos/int=1 --retain/bool=false --persistence-token/any=null -> none:
+  publish topic/string payload/io.Data --qos/int=1 --retain/bool=false --persistence-token/any=null -> none:
+    // We already convert to a ByteArray now, as the `PublishPacket` wants ByteArrays only.
+    // We don't want to change that, since the same packet is also used on the receiving end
+    // where the payload is always a ByteArray.
+    byte-array-payload := payload is ByteArray
+        ? payload
+        : ByteArray.from payload
     if topic == "" or topic.contains "+" or topic.contains "#": throw "INVALID_ARGUMENT"
     if qos == 0:
-      send-publish_ topic payload --packet-id=null --qos=qos --retain=retain
+      send-publish_ topic byte-array-payload --packet-id=null --qos=qos --retain=retain
     else if  qos == 1:
       ack-received-signal_.wait: session_.pending-count < session_.options.max-inflight
       packet-id := session_.next-packet-id
@@ -1091,8 +1097,8 @@ class FullClient:
       // broker can send the ack before the session is ready for it.
       session_.hold-ack-for packet-id
       try:
-        send-publish_ topic payload --packet-id=packet-id --qos=qos --retain=retain
-        session_.set-pending-ack topic payload
+        send-publish_ topic byte-array-payload --packet-id=packet-id --qos=qos --retain=retain
+        session_.set-pending-ack topic byte-array-payload
             --packet-id=packet-id
             --retain=retain
             --persistence-token=persistence-token

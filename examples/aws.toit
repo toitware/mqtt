@@ -74,7 +74,7 @@ main:
   10.repeat:
     temperature += ((random 100) - 50) / 100.0
     print "publishing"
-    client.publish topic "$temperature".to-byte-array
+    client.publish topic "$temperature"
     sleep --ms=2_500
 
   client.close

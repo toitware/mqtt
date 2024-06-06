@@ -2,6 +2,7 @@
 // Use of this source code is governed by an MIT-style license that can be
 // found in the LICENSE file.
 
+import io
 import log
 import net
 import tls
@@ -188,7 +189,7 @@ class Client:
     store can use this information to avoid keeping the data in memory, or to clear data from
     the flash.
   */
-  publish topic/string payload/ByteArray --qos=1 --retain=false --persistence-token/any=null:
+  publish topic/string payload/io.Data --qos=1 --retain=false --persistence-token/any=null:
     client_.publish topic payload --qos=qos --retain=retain --persistence-token=persistence-token
 
   /**
