@@ -1080,6 +1080,9 @@ class FullClient:
     the flash.
   */
   publish topic/string payload/io.Data --qos/int=1 --retain/bool=false --persistence-token/any=null -> none:
+    // We already convert to a ByteArray now, as the `PublishPacket` wants ByteArrays only.
+    // We don't want to change that, since the same packet is also used on the receiving end
+    // where the payload is always a ByteArray.
     byte-array-payload := payload is ByteArray
         ? payload
         : ByteArray.from payload
