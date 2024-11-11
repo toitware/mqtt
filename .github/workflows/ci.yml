@@ -27,7 +27,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install Toit
-        uses: toitlang/action-setup@v1.2.0
+        uses: toitlang/action-setup@v1.3.0
         with:
           toit-version: ${{ matrix.toit-version }}
 
