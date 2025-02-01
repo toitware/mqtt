@@ -35,6 +35,7 @@ test create-transport/Lambda --logger/log.Logger:
   delay-lambda-semaphore := monitor.Semaphore
   delay-lambda-called-semaphore := monitor.Semaphore
   reconnection-strategy := mqtt.TenaciousReconnectionStrategy --logger=logger
+      --reset-duration=Duration.ZERO  // Allow connection attempts, without delay.
       --delay-lambda=::
         delay-lambda-called-semaphore.up
         delay-lambda-semaphore.down
