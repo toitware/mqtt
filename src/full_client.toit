@@ -257,9 +257,22 @@ abstract class ReconnectionStrategyBase implements ReconnectionStrategy:
     Duration --s=5,
     Duration --s=15,
   ]
+  /**
+  The default duration to consider a new connection attempt to be independent
+    from previous attempts.
+
+  If there is a connection attempt within this duration, then the strategy
+    assumes that we managed to connect, but got disconnected immediately after.
+    It then treats this as if we didn't manage to connect at all, increasing
+    the attempts and thus the timeouts.
+  */
+  static DEFAULT-RESET-DURATION /Duration ::= Duration --s=1
 
   receive-connect-timeout_ /Duration
   attempt-delays_ /List?
+  attempt_/int := -1  // Incremented before each connection attempt.
+  last-attempt-time_/int := -1
+  reset-duration-us_/int
   delay-lambda_ /Lambda?
 
   is-closed_ := false
@@ -273,11 +286,13 @@ abstract class ReconnectionStrategyBase implements ReconnectionStrategy:
 
   constructor
       --receive-connect-timeout /Duration = DEFAULT-RECEIVE-CONNECT-TIMEOUT
+      --reset-duration /Duration = DEFAULT-RESET-DURATION
       --delay-lambda /Lambda? = null
       --attempt-delays /List? /*Duration*/ = (delay-lambda ? null : DEFAULT-ATTEMPT-DELAYS)
       --logger/log.Logger?=log.default:
     if delay-lambda and attempt-delays: throw "BOTH_DELAY_LAMBDAS_AND_DELAYS"
     receive-connect-timeout_ = receive-connect-timeout
+    reset-duration-us_ = reset-duration.in-us
     delay-lambda_ = delay-lambda
     attempt-delays_ = attempt-delays
     logger_ = logger
@@ -295,20 +310,29 @@ abstract class ReconnectionStrategyBase implements ReconnectionStrategy:
       [--disconnect-transport]
       [--send-connect]
       [--receive-connect-ack]:
-    attempt-counter := -1
+    current-attempt-time := Time.monotonic-us
+    // If we try to do a connection rapidly after we managed to connect, then we
+    // got probably disconnected. In that case, treat this as if we didn't manage to
+    // connect and keep the last attempt counter to have some back-off.
+    if current-attempt-time - last-attempt-time_ > reset-duration-us_:
+      // Consider this a completely fresh attempt to connect.
+      attempt_ = -1
+
     while true:
       if is-closed: return null
 
-      attempt-counter++
+      attempt_++
 
       is-last-attempt := false
       if attempt-delays_:
-        is-last-attempt = (attempt-counter == attempt-delays_.size)
+        if attempt_ >= attempt-delays_.size:
+          attempt_ = attempt-delays_.size
+          is-last-attempt = true
 
       try:
         catch --unwind=(: is-closed or is-last-attempt):
 
-          if attempt-counter == 0:
+          if attempt_ == 0:
             // In the first iteration we try to connect without delay.
             if not reuse-connection:
               logger_.debug "attempting to (re)connect"
@@ -316,9 +340,9 @@ abstract class ReconnectionStrategyBase implements ReconnectionStrategy:
           else:
             sleep-duration/Duration := ?
             if attempt-delays_:
-              sleep-duration = attempt-delays_[attempt-counter - 1]
+              sleep-duration = attempt-delays_[attempt_ - 1]
             else:
-              sleep-duration = delay-lambda_.call attempt-counter
+              sleep-duration = delay-lambda_.call attempt_
             disconnect-transport.call
             closed-signal_.wait --timeout=sleep-duration
             if is-closed: return null
@@ -332,6 +356,7 @@ abstract class ReconnectionStrategyBase implements ReconnectionStrategy:
             logger_.debug "connection established"
             result
       finally: | is-exception _ |
+        last-attempt-time_ = Time.monotonic-us
         if is-exception:
           logger_.debug "attempting to (re)connect failed"
 
@@ -535,10 +560,12 @@ class TenaciousReconnectionStrategy extends ReconnectionStrategyBase:
   constructor
       --logger/log.Logger=log.default
       --receive-connect-timeout /Duration = ReconnectionStrategyBase.DEFAULT-RECEIVE-CONNECT-TIMEOUT
+      --reset-duration /Duration = ReconnectionStrategyBase.DEFAULT-RESET-DURATION
       --delay-lambda /Lambda:
     super --logger=logger
         --receive-connect-timeout=receive-connect-timeout
         --delay-lambda=delay-lambda
+        --reset-duration=reset-duration
 
   connect -> bool?
       transport/ActivityMonitoringTransport_
