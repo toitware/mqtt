@@ -6,5 +6,6 @@ packages:
     path: ..
   toit-cert-roots:
     url: github.com/toitware/toit-cert-roots
+    name: certificate_roots
     version: 1.2.0
     hash: b108d257000e7ac21ebefb03e1111f9dfa75bc02

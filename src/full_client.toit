@@ -668,6 +668,9 @@ class Session_:
     while true:
       candidate := next-packet-id_
       next-packet-id_ = (candidate + 1) & ((1 << PublishPacket.ID-BIT-SIZE) - 1)
+
+      // Message ID 0 is reserved as invalid.
+      if candidate == 0: continue
       // If we are waiting for an ACK of the candidate id, pick a different one.
       if persistence-store_.get candidate: continue
       return candidate
