@@ -309,7 +309,7 @@ class SimpleClient:
 
   The $block is called whenever a new packet is received.
   */
-  wait-for-received_ -> bool
+  loock-for-received_ -> bool
       --without-mutex/True
       --kind/string
       --allow-close/bool=false
@@ -358,10 +358,11 @@ class SimpleClient:
     connection-monitor_.do-wait
         --do=: send-packet_ --without-mutex packet
         --wait=:
-          wait-for-received_ --without-mutex --kind=kind:
-            logger_.debug "checking if ack received" --tags={"packet-id": packet-id}
+          loock-for-received_ --without-mutex --kind=kind:
             if last-received_ is AckPacket:
               ack := last-received_ as AckPacket
+              if ack.packet-id == packet-id:
+                logger_.debug "ack received" --tags={"packet-id": packet-id}
               ack.packet-id == packet-id
             else:
               false
@@ -409,7 +410,7 @@ class SimpleClient:
 
   Blocks until the subscription is acknowledged.
   */
-  subscribe topic/string --max-qos/int=0:
+  subscribe topic/string --max-qos/int=1:
     packet-id := next-packet-id_
     topic-qos := [TopicQos topic --max-qos=max-qos]
     packet := SubscribePacket topic-qos --packet-id=packet-id
@@ -441,10 +442,11 @@ class SimpleClient:
   receive -> PublishPacket?:
     e := catch --unwind=(: state_ != STATE-DISCONNECTED_ or state_ == STATE-CLOSED_):
       connection-monitor_.wait:
-        wait-for-received_
-            --without-mutex: not received-queue_.is-empty
-            --kind="receive"
-            --allow-close
+        loock-for-received_ --allow-close --kind="receive" --without-mutex:
+          not received-queue_.is-empty
+      if received-queue_.is-empty:
+        // We are closed.
+        return null
       return received-queue_.remove-first
     return null
 
