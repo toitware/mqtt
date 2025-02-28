@@ -94,7 +94,6 @@ test-unclean-session create-transport/Lambda --logger/log.Logger:
   other-client.publish "foo/gee" "msg" --qos=1
 
   // Connect again.
-  // Since we don't give routes to the client, the catch-all-callback will handle the messages.
   unclean-transport = create-transport.call
   unclean-client = mqtt.SimpleClient --transport=unclean-transport --logger=logger
   catch-all-counter := 0
@@ -110,7 +109,6 @@ test-unclean-session create-transport/Lambda --logger/log.Logger:
       else:
         catch-all-counter++
 
-  unclean-client.subscribe "done"
   unclean-client.publish "done" "done" --qos=0
   done.get
 
@@ -127,7 +125,6 @@ test-unclean-session create-transport/Lambda --logger/log.Logger:
   unclean-client = mqtt.SimpleClient --transport=unclean-transport --logger=logger
 
   unclean-client.start --client-id="unclean"
-  unclean-client.subscribe "foo/#"
 
   done = monitor.Latch
   // Don't use the same counter as before, as the client might not have

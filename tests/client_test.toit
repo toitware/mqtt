@@ -83,7 +83,6 @@ test-unclean-session create-transport/Lambda --logger/log.Logger:
         catch-all-counter++
 
   done = monitor.Latch
-  unclean-client.subscribe "done":: done.set true
   unclean-client.publish "done" "done".to-byte-array --qos=0
   done.get
 
@@ -113,7 +112,6 @@ test-unclean-session create-transport/Lambda --logger/log.Logger:
         catch-all-counter2++
 
   done = monitor.Latch
-  unclean-client.subscribe "done":: done.set true
   unclean-client.publish "done" "done".to-byte-array --qos=0
   done.get
 
