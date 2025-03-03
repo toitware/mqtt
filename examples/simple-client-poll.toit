@@ -1,4 +1,4 @@
-// Copyright (C) 2025 Toitlang
+// Copyright (C) 2025 Toit contributors
 // Use of this source code is governed by a Zero-Clause BSD license that can
 // be found in the EXAMPLES_LICENSE file.
 
@@ -41,17 +41,16 @@ main:
   client.publish "$TOPIC-PREFIX/bar" "hello_world" --qos=1
   client.unsubscribe "$TOPIC-PREFIX/#"
 
-  expected-count := 2
-  while expected-count > 0:
+  2.repeat:
     // Poll for incoming messages.
+    // The `receive` call is blocking. If you want to avoid blocking,
+    // you can use `client.received-count` to check if there are any
+    // messages available.
     // The call to `client.receive` can throw. Make sure to guard it
     // with a `catch` if necessary.
     publish := client.receive
     if not publish:
       throw "CONNECTION_CLOSED"
     print "Incoming: $publish.topic $publish.payload.to-string"
-    expected-count--
-
-    sleep --ms=10
 
   client.close

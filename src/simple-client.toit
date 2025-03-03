@@ -1,4 +1,4 @@
-// Copyright (C) 2025 Toitlang Team.
+// Copyright (C) 2025 Toit contributors
 // Use of this source code is governed by an MIT-style license that can be
 // found in the LICENSE file.
 
@@ -158,7 +158,7 @@ class SimpleClient:
   disconnect_ -> none:
     state_ = STATE-DISCONNECTED_
 
-    // Kill the ping-task.
+    // Kill the pinger-task.
     if pinger-task_: pinger-task_.cancel
 
     disconnect-packet := DisconnectPacket
@@ -167,7 +167,6 @@ class SimpleClient:
     connection-monitor_.wait: state_ == STATE-CLOSED_
 
   tear-down_:
-    // catch --trace: throw "x"
     critical-do:
       state_ = STATE-CLOSED_
       if reader-task_: reader-task_.cancel
@@ -309,7 +308,7 @@ class SimpleClient:
 
   The $block is called whenever a new packet is received.
   */
-  loock-for-received_ -> bool
+  look-for-received_ -> bool
       --without-mutex/True
       --kind/string
       --allow-close/bool=false
@@ -358,7 +357,7 @@ class SimpleClient:
     connection-monitor_.do-wait
         --do=: send-packet_ --without-mutex packet
         --wait=:
-          loock-for-received_ --without-mutex --kind=kind:
+          look-for-received_ --without-mutex --kind=kind:
             if last-received_ is AckPacket:
               ack := last-received_ as AckPacket
               if ack.packet-id == packet-id:
@@ -442,7 +441,7 @@ class SimpleClient:
   receive -> PublishPacket?:
     e := catch --unwind=(: state_ != STATE-DISCONNECTED_ or state_ == STATE-CLOSED_):
       connection-monitor_.wait:
-        loock-for-received_ --allow-close --kind="receive" --without-mutex:
+        look-for-received_ --allow-close --kind="receive" --without-mutex:
           not received-queue_.is-empty
       if received-queue_.is-empty:
         // We are closed.
@@ -465,6 +464,12 @@ monitor MutexSignal:
   wait [block]:
     await block
 
+  /**
+  Runs the $do block, and the waits for the $wait block.
+
+  Contrary to a sequence of $do and $wait, this function doesn't
+    release the lock between the two blocks.
+  */
   do-wait [--do] [--wait]:
     do.call
     await wait
