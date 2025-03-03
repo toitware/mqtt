@@ -140,8 +140,8 @@ test-unclean-session create-transport/Lambda --logger/log.Logger:
       if packet.topic == "done":
         done.set true
       else if packet.topic.starts-with "foo/handled":
-          routed-messages-counter++
-          expect-equals "msg" packet.payload.to-string
+        routed-messages-counter++
+        expect-equals "msg" packet.payload.to-string
       else:
         catch-all-counter2++
 

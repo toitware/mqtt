@@ -12,7 +12,7 @@ can find more examples in the [examples/](examples/) folder.
 The simple client is useful, if advanced features, like automatic
 reconnects, topic routing, parallel sending, etc., are not needed.
 
-In many cases they are easier to use than the `Client` or `FullClient`.
+In many cases it is easier to use than the `Client` or `FullClient`.
 
 ```toit
 import mqtt
@@ -37,7 +37,7 @@ main:
 
 ### Routing client
 
-The routing client is a wrapper around the `FullClient`. It routes incoming
+The routing `Client` is a wrapper around the `FullClient`. It routes incoming
 messages to the appropriate handler based on the topic.
 
 Since it is based on the `FullClient` it automatically reconnects to the broker

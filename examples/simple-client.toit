@@ -1,4 +1,4 @@
-// Copyright (C) 2025 Toitlang
+// Copyright (C) 2025 Toit contributors
 // Use of this source code is governed by a Zero-Clause BSD license that can
 // be found in the EXAMPLES_LICENSE file.
 
@@ -39,7 +39,7 @@ main:
   // background tasks running.
   // If not provided, then the receiver-task will keep the program
   // alive even if the rest of the program has finished.
-  task::
+  task --no-background::
     while true:
       // The call to `client.receive` can throw. Make sure to guard it
       // with a `catch` if necessary.
