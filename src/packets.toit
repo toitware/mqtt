@@ -178,13 +178,12 @@ class ConnectPacket extends Packet:
     return buffer.bytes
 
   stringify -> string:
-    return ("Connect: $client-id"
-            + " $(clean-session ? "clean": "reuse")"
-            + " $(last-will ? "last-will-for-$last-will.topic": "no-last-will")"
-            + " $(username ? "with-username-$username": "no-username")"
-            + " $(password ? "with-password-$password": "no-password")"
-            + " $keep-alive")
-
+    return "Connect: $client-id"
+        + " $(clean-session ? "clean": "reuse")"
+        + " $(last-will ? "last-will-for-$last-will.topic" : "no-last-will")"
+        + " $(username ? "with-username-$username" : "no-username")"
+        + " $(password ? "with-password-$password" : "no-password")"
+        + " $keep-alive"
 class ConnAckPacket extends Packet:
   static TYPE ::= 2
 
@@ -303,8 +302,8 @@ class PublishPacket extends Packet:
     result := "Publish$(packet-id ? "($packet-id)" : "")"
             + " topic=$topic"
             + " qos=$qos"
-            + " $(duplicate ? "dup": "no-dup")"
-            + " $(retain ? "retain": "no-retain")"
+            + " $(duplicate ? "dup" : "no-dup")"
+            + " $(retain ? "retain" : "no-retain")"
             + " $payload.size bytes"
     sub-payload := payload_[..min 15 payload_.size]
     if (sub-payload.every: it < 128):
