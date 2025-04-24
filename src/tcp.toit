@@ -100,10 +100,12 @@ class ReconnectingTransport_ extends TcpTransport:
     port_ = port
     open_ = net-open
     super.from-subclass_
+    success := false
     try:
       reconnect
-    finally: | is-exception _ |
-      if is-exception: close
+      success = true
+    finally:
+      if not success: close
 
   close -> none:
     super
