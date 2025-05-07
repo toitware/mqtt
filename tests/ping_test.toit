@@ -122,7 +122,7 @@ main args:
     task:: with-mosquitto --logger=logger: test it logger
     // Older mosquitto brokers have a bug that they don't see incoming bytes
     // as activity. Same seems to be the case for macos.
-    if not get-mosquitto-version.starts-with "1." or system.platform == system.PLATFORM-MACOS:
+    if not (get-mosquitto-version.starts-with "1." or system.platform == system.PLATFORM-MACOS):
       task:: with-mosquitto --logger=logger: test-slow-write it logger
 
   else:
