@@ -10,20 +10,19 @@ import mqtt.transport as mqtt
 import net
 
 get-mosquitto-version:
-  fork-data := pipe.fork
-      true  // use_path.
-      pipe.PIPE-INHERITED  // stdin.
-      pipe.PIPE-CREATED    // stdout.
-      pipe.PIPE-INHERITED  // stderr.
+  process := pipe.fork
+      --use-path
+      --create-stdout
       "mosquitto"  // Program.
       ["mosquitto", "-h"]  // Args.
-  stdout /pipe.OpenPipe := fork-data[1]
+  stdout := process.stdout
   out-data := #[]
   task::
-    while chunk := stdout.read:
+    reader := stdout.in
+    while chunk := reader.read:
       out-data += chunk
 
-  pipe.wait-for fork-data[3]
+  process.wait
   out-str := out-data.to-string
   first-line /string := (out-str.split "\n").first
   return first-line.trim --left "mosquitto version "
@@ -31,16 +30,15 @@ get-mosquitto-version:
 start-mosquitto:
   port /string := pipe.backticks "python" "third_party/ephemeral-port-reserve/ephemeral_port_reserve.py"
   port = port.trim
-  fork-data := pipe.fork
-      true  // use_path.
-      pipe.PIPE-INHERITED  // stdin.
-      pipe.PIPE-CREATED  // stdout.
-      pipe.PIPE-CREATED  // stderr.
+  process := pipe.fork
+      --use-path
+      --create-stdout
+      --create-stderr
       "mosquitto"  // Program.
       ["mosquitto", "-v", "-p", port]  // Args.
   return [
     int.parse port,
-    fork-data
+    process,
   ]
 
 with-mosquitto --logger/log.Logger [block]:
@@ -48,19 +46,19 @@ with-mosquitto --logger/log.Logger [block]:
   port := mosquitto-data[0]
   logger.info "started mosquitto on port $port"
 
-  mosquitto-fork-data := mosquitto-data[1]
+  mosquitto-process/pipe.Process := mosquitto-data[1]
 
   mosquitto-is-running := monitor.Latch
   stdout-bytes := #[]
   stderr-bytes := #[]
   task::
-    stdout /pipe.OpenPipe := mosquitto-fork-data[1]
-    while chunk := stdout.read:
+    stdout-reader := mosquitto-process.stdout.in
+    while chunk := stdout-reader.read:
       logger.debug chunk.to-string.trim
       stdout-bytes += chunk
   task::
-    stderr /pipe.OpenPipe := mosquitto-fork-data[2]
-    while chunk := stderr.read:
+    stderr-reader := mosquitto-process.stderr.in
+    while chunk := stderr-reader.read:
       str := chunk.to-string.trim
       logger.debug str
       stderr-bytes += chunk
@@ -92,10 +90,10 @@ with-mosquitto --logger/log.Logger [block]:
   try:
     block.call:: mqtt.TcpTransport --net-open=(:: net.open) --host="localhost" --port=port
   finally: | is-exception _ |
-    pid := mosquitto-fork-data[3]
+    pid := mosquitto-process.pid
     logger.info "killing mosquitto server"
     pipe.kill_ pid 15
-    pipe.wait-for pid
+    mosquitto-process.wait
     if is-exception:
       print stdout-bytes.to-string
       print stderr-bytes.to-string
