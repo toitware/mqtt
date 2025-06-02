@@ -4,15 +4,14 @@
 
 file(GLOB TESTS RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "*_test.toit" "*-test.toit")
 
-set(TOIT_EXEC "toit.run${CMAKE_EXECUTABLE_SUFFIX}" CACHE FILEPATH "The executable used to run the tests")
-set(TPKG_EXEC "toit.pkg${CMAKE_EXECUTABLE_SUFFIX}" CACHE FILEPATH "The executable used to install the packages")
+set(TOIT_EXEC "toit${CMAKE_EXECUTABLE_SUFFIX}" CACHE FILEPATH "The path to the 'toit' executable")
 
 set(TEST_TIMEOUT 40 CACHE STRING "The maximal amount of time each test is allowed to run")
 set(WITH_MOSQUITTO TRUE CACHE BOOL "Whether the tests should also run with mosquitto")
 
 add_custom_target(
   "install-pkgs"
-  COMMAND "${TPKG_EXEC}" install
+  COMMAND "${TOIT_EXEC}" pkg install
   WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
 )
 
@@ -32,7 +31,7 @@ add_custom_target(
 foreach(file ${TESTS})
   add_test(
     NAME ${file}
-    COMMAND "${TOIT_EXEC}" "${file}"
+    COMMAND "${TOIT_EXEC}" run "${file}"
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
     )
   set_tests_properties(${file} PROPERTIES TIMEOUT ${TEST_TIMEOUT})
@@ -41,7 +40,7 @@ foreach(file ${TESTS})
     set(test_name "${file}-mosquitto")
     add_test(
       NAME "${test_name}"
-      COMMAND "${TOIT_EXEC}" "${file}" --mosquitto
+      COMMAND "${TOIT_EXEC}" run "${file}" -- --mosquitto
       WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
       )
     set_tests_properties(${test_name} PROPERTIES TIMEOUT ${TEST_TIMEOUT})
