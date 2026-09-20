@@ -1,12 +1,6 @@
 sdk: ^2.0.0-alpha.198
 prefixes:
-  certificate_roots: toit-cert-roots
   mqtt: ..
 packages:
   ..:
     path: ..
-  toit-cert-roots:
-    url: github.com/toitware/toit-cert-roots
-    name: certificate-roots
-    version: 1.10.0
-    hash: 1445c4a6cae47689674ae02c5f1dc03660f1df8c

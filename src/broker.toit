@@ -1,434 +1,213 @@
-// Copyright (C) 2022 Toitware ApS. All rights reserved.
+// Copyright (C) 2026 Toit contributors.
 // Use of this source code is governed by an MIT-style license that can be
 // found in the LICENSE file.
 
-/**
-A simple MQTT broker library.
-
-This implementation was created for testing, but is fully functional.
-*/
-
-import io
-import log
-import monitor
+import .broker-state
+import .completion
+import .errors
+import .link
 import .packets
-import .last-will
-import .topic-qos
-import .topic-tree
-import .utils_
+import .payload-store
+import .topics
+import .wire
+
+export BrokerLimits PayloadStore MemoryPayloadStore
+
+monitor BrokerTasks_:
+  limit_/int
+  links_/List := []
+  stopping/bool := false
+  failure/any := null
+  client-errors/int := 0
+  last-client-error/any := null
+  constructor .limit_:
+  add link/Link -> bool:
+    if stopping or links_.size >= limit_: return false
+    links_.add link
+    return true
+  remove link/Link:
+    links_.remove link
+  report failure/any:
+    client-errors++
+    last-client-error = failure
+  stop --reason=null -> List:
+    stopping = true
+    if reason and not failure: failure = reason
+    return links_.copy
+  wait:
+    await: links_.is-empty
 
 /**
-The transport interface used by the broker.
-*/
-interface BrokerTransport:
-  write bytes/ByteArray -> int
-  read -> ByteArray?
-  close -> none
-
-/**
-The transport interface allowing the broker to listen to incoming connections.
-*/
-interface ServerTransport:
-  /**
-  Listens for incoming connections and calls the $callback whenever a client connects.
-  Calls the $callback with a $BrokerTransport as argument.
-  */
-  listen callback/Lambda -> none
-  close -> none
-
-/**
-A reader that can timeout.
-*/
-class TimeoutReader_ extends io.Reader:
-  transport_ /BrokerTransport
-  timeout_ /Duration? := null
-
-  constructor .transport_:
-
-  read_ -> ByteArray?:
-    if timeout_:
-      with-timeout timeout_: return transport_.read
-    return transport_.read
-
-  set-timeout timeout/Duration:
-    timeout_ = timeout
-
-class TransportWriter_ extends io.Writer:
-  transport_ /BrokerTransport
-
-  constructor .transport_:
-
-  try-write_ data/io.Data from/int to/int -> int:
-    return transport_.write (io-data-to-byte-array_ data from to)
-
-class Connection_:
-  transport_ /BrokerTransport
-  reader_ /TimeoutReader_
-  writer_ /io.Writer
-
-  constructor .transport_:
-    reader_ = TimeoutReader_ transport_
-    writer_ = TransportWriter_ transport_
-
-  read -> Packet?:
-    return Packet.deserialize reader_
-
-  write packet/Packet:
-    writer_.write packet.serialize
-
-  close -> none:
-    transport_.close
-
-  set-read-timeout duration/Duration:
-    reader_.set-timeout duration
-
-
-monitor QueuedMessages_:
-  // Messages that haven't been sent yet.
-  queued_ /Deque := Deque
-  // Acks that haven't been sent yet.
-  queued-acks_ /Deque := Deque
-
-  next -> Packet?:
-    await: not queued_.is-empty or not queued-acks_.is-empty
-    if not queued-acks_.is-empty: return queued-acks_.remove-first
-    return queued_.remove-first
-
-  add-ack packet/Packet:
-    queued-acks_.add packet
-
-  add-packet packet/Packet:
-    queued_.add packet
-
-  size -> int:
-    return queued_.size + queued-acks_.size
-
-/**
-A client session.
-
-This object keeps track of all the data needed to maintain a session state for
-  each client.
-
-If the client connects with a 'clean_session' flag, then this object only stays
-  alive until the client disconnects. Otherwise, it is kept forever.
-
-If a client subscribes to messages, but never connects again, the data is just
-  saved in the session. Eventually, the broker will run out of memory.
-*/
-class Session_:
-  static STATE-CREATED_ ::= 0
-  static STATE-RUNNING_ ::= 1
-  static STATE-DISCONNECTED_  ::= 2
-  // Note that a state can go from disconnected to running again.
-  state_ /int := STATE-CREATED_
-
-  client-id /string
-  broker /Broker
-  clean-session /bool
-  logger_ /log.Logger
-
-  subscription-tree_ /TopicTree ::= TopicTree
-  connection_ /Connection_? := null
-  reader-task_ /Task? := null
-  writer-task_ /Task? := null
-
-  queued_ /QueuedMessages_ ::= QueuedMessages_
-
-  // Messages that have been sent but not yet acknowledged.
-  waiting-for-ack_ /Map := {:}
-
-  last-will_ /LastWill? := null
-
-  next-packet-id_ := 0
-
-  constructor .client-id --logger/log.Logger --.broker/Broker --.clean-session/bool:
-    logger_ = logger
-
-  run connection/Connection_ --keep-alive/Duration --last-will/LastWill?:
-    // Note that there could be a race condition here:
-    // If there are multiple requests for the same client, then we might be
-    // in the process of closing, while another task enters here.
-    if state_ == STATE-RUNNING_: disconnect --reason="already running"
-
-    state_ = STATE-RUNNING_
-    last-will_ = last-will
-
-    connection_ = connection
-
-    if not keep-alive.is-zero:
-      connection.set-read-timeout (keep-alive * 2)
-
-    reader-task_ = task::
-      exception := catch --trace:
-        while true:
-          packet := connection.read
-          if not packet and state_ != STATE-DISCONNECTED_:
-            logger_.info "client $client-id disconnected"
-            disconnect --reason="CLIENT_DISCONNECTED"
-            break
-          logger_.debug "received $packet from client $client-id"
-          try:
-            handle packet
-          finally: | is-exception _ |
-            if is-exception:
-              logger_.error "error handling packet $packet"
-      if exception: disconnect --reason=exception
-
-    writer-task_ = task::
-      exception := catch --trace:
-        if not waiting-for-ack_.is-empty:
-          waiting-for-ack_.do --values: | packet/PublishPacket |
-            duped := packet.with --duplicate=true
-            connection_.write duped
-
-        while true:
-          packet := queued_.next
-          logger_.debug "writing $packet"
-          if packet is PublishPacket:
-            publish := packet as PublishPacket
-            if publish.qos > 0:
-              waiting-for-ack_[publish.packet-id] = publish
-
-          connection_.write packet
-      logger_.info "client $client-id writer task closed with $queued_.size messages pending"
-
-  handle packet/Packet:
-    if packet is SubscribePacket:
-      subscribe-packet := packet as SubscribePacket
-      subscribe subscribe-packet
-      return
-
-    if packet is UnsubscribePacket:
-      unsubscribe-packet := packet as UnsubscribePacket
-      unsubscribe unsubscribe-packet
-      return
-
-    if packet is PublishPacket:
-      publish-packet := packet as PublishPacket
-      publish publish-packet
-      return
-
-    if packet is PingReqPacket:
-      ping
-      return
-
-    if packet is DisconnectPacket:
-      disconnect
-      return
-
-    if packet is PubAckPacket:
-      id := (packet as PubAckPacket).packet-id
-      waiting-for-ack_.remove id
-      return
-
-    logger_.warn "unhandled packet $packet"
-
-  subscribe packet/SubscribePacket:
-    result-qos := []
-    allow-plus := true
-    last-was-plus := false
-    packet.topics.do: | topic-qos/TopicQos |
-      topic := topic-qos.topic
-      for i := 0; i < topic.size; i++:
-        char := topic[i]
-        if not char: continue  // Unicode character.
-        if last-was-plus and char != '/': throw "INVALID_SUBSCRIPTION: $topic"
-        if char == '+':
-          if not allow-plus: throw "INVALID_SUBSCRIPTION: $topic"
-          else: last-was-plus = true
-        else:
-          last-was-plus = false
-        allow-plus = char == '/'
-
-        if char == '#' and i != topic.size - 1:
-          throw "INVALID_SUBSCRIPTION: $topic"
-
-      if not 0 <= topic-qos.max-qos <= 2:
-        throw "INVALID_SUBSCRIPTION: $topic ($topic-qos.max-qos)"
-
-      accepted-qos := min topic-qos.max-qos 1
-      subscription-tree_.set topic accepted-qos
-      result-qos.add accepted-qos
-    send_ (SubAckPacket --qos=result-qos --packet-id=packet.packet-id)
-
-    packet.topics.do: | topic-qos/TopicQos |
-      topic := topic-qos.topic
-      broker.retained.do topic --all: | retained/PublishPacket |
-        qos := min topic-qos.max-qos  retained.qos
-        packet-id := qos > 0 ? next-packet-id_++ : null
-        send_ (retained.with --packet-id=packet-id --retain --qos=qos)
-
-  unsubscribe packet/UnsubscribePacket:
-    packet.topics.do: | topic |
-      existed := subscription-tree_.remove topic
-      if not existed:
-        logger_.info "client $client-id unsubscribed from non-existent topic $topic"
-    send_ (UnsubAckPacket --packet-id=packet.packet-id)
-
-  publish packet/PublishPacket:
-    topic := packet.topic
-    if topic == "" or topic.contains "#" or topic.contains "+":
-      throw "INVALID PUBLISH TOPIC. NO WILD CARDS ALLOWED. $packet.topic"
-    needs-ack := packet.qos > 0
-    if needs-ack:
-      packet-id := packet.packet-id
-      send-ack_ (PubAckPacket --packet-id=packet-id)
-
-    broker.publish packet
-
-  ping:
-    send_ (PingRespPacket)
-
-  disconnect --reason=null -> none:
-    if state_ == STATE-DISCONNECTED_: return
-    state_ = STATE-DISCONNECTED_
-    reason-suffix := reason ? " ($reason)" :""
-    logger_.info "client $client-id closing$reason-suffix"
-    if connection_:
-      connection_.close
-      connection_ = null
-
-    // Send the last will before we kill all tasks.
-    // Otherwise we will cancel the task on which we currently run on.
-    if reason and last-will_:
-      packet-id := last-will_.qos > 0 ? next-packet-id_++ : null
-      packet := PublishPacket last-will_.topic last-will_.payload \
-          --qos=last-will_.qos --packet-id=packet-id --retain=last-will_.retain
-      broker.publish packet
-
-    if clean-session: broker.remove-session_ client-id
-
-    // Cancel the writer_task_ first, since the reader task might be
-    // the one calling the disconnect.
-    assert: writer-task_ != Task.current
-    if writer-task_:
-      writer-task_.cancel
-      writer-task_ = null
-    if reader-task_:
-      reader-task := reader-task_
-      reader-task_ = null
-      reader-task.cancel
-
-  send_ packet/Packet:
-    queued_.add-packet packet
-
-  send-ack_ ack/Packet:
-    queued_.add-ack ack
-
-  dispatch-incoming-publish packet/PublishPacket:
-    // There doesn't seem to be a rule which qos we should use if multiple
-    // subscriptions match. We thus use the one from the most specialized.
-    subscription-tree_.do --most-specialized packet.topic: | subscription-max-qos |
-      qos := min packet.qos subscription-max-qos
-      if state_ != STATE-RUNNING_ and qos == 0:
-        // We don't queue qos=0 packets if the client is disconnected.
-        // In theory we could/should also delete queued messages if the
-        // client disconnects after we queued them.
-        continue.do
-      NO-PACKET-ID ::= -1  // See $PublishPacket.with.
-      packet-id := qos > 0 ? next-packet-id_++ : NO-PACKET-ID
-      send_ (packet.with --packet-id=packet-id --qos=qos)
-
-/** An unbounded channel for publish messages. */
-class PublishChannel_:
-  // Messages that haven't been sent yet.
-  queued_ /Deque := Deque
-  semaphore_ /monitor.Semaphore := monitor.Semaphore
-
-  next -> Packet:
-    semaphore_.down
-    return queued_.remove-first
-
-  add packet/Packet:
-    queued_.add packet
-    semaphore_.up
-
-/**
-An MQTT broker.
+An embedded MQTT 3.1.1 broker with explicit resource budgets.
+
+One state monitor owns sessions and payload references. Each accepted connection
+  has a reader and writer; neither holds that monitor during socket I/O. Slow or
+  invalid clients are disconnected independently. Storage failure stops the broker.
+
+Persistent sessions survive network reconnection, but not broker restart. Expiry
+  is applied on admission or explicitly with expire-sessions. All payloads are
+  bounded, including retained messages and wills. Capacity exhaustion closes an
+  incoming publisher without acknowledging its QoS 1 message. Unpublishable wills
+  increment the dropped-wills statistic.
 */
 class Broker:
-  sessions_ /Map ::= {:}
-  server-transport_ /ServerTransport
-  logger_ /log.Logger
-  publish-channel_ /PublishChannel_ ::= PublishChannel_
+  listener_/Listener
+  limits_/BrokerLimits
+  state_/BrokerState_
+  tasks_/BrokerTasks_
+  wire_/Wire
+  lifetime_/Completion_ := Completion_
+  started_/bool := false
+  authenticate_/Lambda?
 
-  retained /TopicTree ::= TopicTree
+  constructor listener/Listener --limits/BrokerLimits=BrokerLimits
+      --store/PayloadStore=MemoryPayloadStore
+      --authenticate/Lambda?=null:
+    listener_ = listener
+    limits_ = limits
+    state_ = BrokerState_ limits store
+    tasks_ = BrokerTasks_ limits.connections
+    wire_ = Wire --max-packet-size=limits.packet-bytes
+    authenticate_ = authenticate
 
-  constructor .server-transport_ --logger/log.Logger=log.default:
-    logger_ = logger
+  /** Starts accepting clients. Observe its lifetime with wait-closed. */
+  start -> none:
+    if started_: throw "ALREADY_STARTED"
+    started_ = true
+    task --background:: run_
 
-  start:
-    logger_.info "starting broker"
+  /** Stops accepting connections and closes all clients. */
+  close -> none:
+    stop_
+    if not started_:
+      started_ = true
+      failure := catch: state_.close
+      lifetime_.complete --failure=(tasks_.failure or failure)
 
-    publish-task := task --background::
-      while true:
-        packet := publish-channel_.next
-        sessions_.do  --values: | session |
-          session.dispatch-incoming-publish packet
+  /** Waits for all connection tasks and storage cleanup; throws terminal failure. */
+  wait-closed -> none:
+    if not started_: throw "NOT_STARTED"
+    lifetime_.wait
 
+  /** Publishes locally, with the same admission rules as a network publisher. */
+  publish topic/string payload/ByteArray --qos/int=1 --retain/bool=false -> none:
+    validate-topic topic
+    if qos != 0 and qos != 1: throw "INVALID_ARGUMENT"
+    if tasks_.stopping: throw (MqttError "BROKER_CLOSED")
+    packet := PublishPacket topic payload --qos=qos --retain=retain --packet-id=(qos == 1 ? 1 : null)
+    wire_.encode packet
+    failure := catch: state_.publish packet
+    if failure:
+      if failure is StorageError: stop_ --reason=failure
+      throw failure
+
+  /** Returns bounded-state counts and client failure diagnostics. */
+  stats -> Map:
+    result := state_.stats
+    result["failure"] = tasks_.failure
+    result["client-errors"] = tasks_.client-errors
+    result["last-client-error"] = tasks_.last-client-error
+    return result
+
+  /** Expires disconnected sessions using a monotonic timestamp. */
+  expire-sessions --now/int=Time.monotonic-us:
+    failure := catch: state_.expire now
+    if failure:
+      if failure is StorageError: stop_ --reason=failure
+      throw failure
+
+  stop_ --reason=null:
+    links := tasks_.stop --reason=reason
+    listener_.close
+    links.do: it.close
+
+  run_:
+    failure := catch:
+      while not tasks_.stopping:
+        link := listener_.accept
+        if not link: break
+        if not tasks_.add link:
+          link.close
+          continue
+        serve-background_ link
+    if failure and not tasks_.stopping: stop_ --reason=failure
+    critical-do:
+      stop_
+      tasks_.wait
+      cleanup-failure := catch: state_.close
+      lifetime_.complete --failure=(tasks_.failure or cleanup-failure)
+
+  serve-background_ link/Link:
+    task --background::
+      failure := catch: serve_ link
+      critical-do:
+        link.close
+        if failure and not tasks_.stopping:
+          tasks_.report failure
+          if failure is StorageError: stop_ --reason=failure
+        tasks_.remove link
+
+  serve_ link/Link:
+    connection := PacketConnection_ link wire_ --write-timeout=limits_.write-timeout
+    session/BrokerSession_? := null
+    generation := 0
+    graceful := false
+    writer/Task? := null
+    writer-failure/any := null
     try:
-      server-transport_.listen::
-        logger_.info "connection established"
-        connection := Connection_ it
-        exception := catch --trace:
-          packet := connection.read
-          if not packet:
-            logger_.info "connection was closed"
-            connection.close
-            continue.listen
-
-          logger_.debug "read packet $packet"
-          if packet is not ConnectPacket:
-            logger_.error "didn't receive connect packet, but got packet of type $packet.type"
-            connection.close
-            continue.listen
-
-          connect := packet as ConnectPacket
-
-          logger_.debug "new connection-request: $connect"
-
-          client-id := connect.client-id
-          connack /ConnAckPacket ::= ?
-
-          clean-session := connect.clean-session
-          if client-id == "": client-id = "unknown-$(random)"
-          session-present /bool ::= ?
-          session /Session_? := sessions_.get connect.client-id
-          if session and (clean-session or session.clean-session):
-            logger_.info "removing existing session for client $client-id"
-            session.disconnect
-            session = null
-          if session:
-            logger_.info "existing session for client $client-id"
-            session-present = true
-          else:
-            logger_.info "new session for client $client-id"
-            session = Session_ client-id --broker=this --logger=logger_ --clean-session=clean-session
-            sessions_[connect.client-id] = session
-            session-present = false
-
-          session.run connection --keep-alive=connect.keep-alive --last-will=connect.last-will
-          connack = ConnAckPacket --session-present=session-present --return-code=0x00
-
-          connection.write connack
-
-          // Currently we always succeed the connection, so the following 'if' never triggers.
-          if connack.return-code != 0:
-            connection.close
-            continue.listen
+      request/ConnectPacket? := null
+      with-timeout limits_.handshake-timeout:
+        packet := connection.read
+        if packet is not ConnectPacket: throw (ProtocolError "expected CONNECT")
+        request = packet as ConnectPacket
+        if authenticate_ and not authenticate_.call request:
+          connection.write (ConnAckPacket --return-code=ConnAckPacket.NOT-AUTHORIZED)
+          return
+      previous := state_.previous request.client-id
+      if previous: previous.close
+      attached := state_.attach request connection Time.monotonic-us
+      session = attached[0]
+      generation = attached[1]
+      previous = attached[3]
+      if previous: previous.close
+      connection.write (ConnAckPacket --session-present=attached[2])
+      writer = task --background::
+        writer-failure = catch:
+          while entry := state_.next session generation:
+            delivery/Delivery_ := entry[0]
+            connection.write entry[1]
+            state_.sent session generation delivery
+        connection.close
+      while true:
+        packet/Packet? := null
+        timeout := request.keep-alive.is-zero ? limits_.idle-timeout : request.keep-alive * 1.5
+        with-timeout timeout: packet = connection.read
+        if not packet: break
+        if packet is DisconnectPacket:
+          graceful = true
+          break
+        else if packet is PublishPacket:
+          publish := packet as PublishPacket
+          state_.publish-from session generation publish
+          if publish.qos == 1: connection.write (PubAckPacket --packet-id=publish.packet-id)
+        else if packet is SubscribePacket:
+          subscribe := packet as SubscribePacket
+          qos := state_.subscribe session generation subscribe
+          connection.write (SubAckPacket --packet-id=subscribe.packet-id --qos=qos)
+        else if packet is UnsubscribePacket:
+          unsubscribe := packet as UnsubscribePacket
+          state_.unsubscribe session generation unsubscribe
+          connection.write (UnsubAckPacket --packet-id=unsubscribe.packet-id)
+        else if packet is PubAckPacket:
+          state_.ack session generation (packet as PubAckPacket)
+        else if packet is PingReqPacket:
+          connection.write PingRespPacket
+        else:
+          throw (ProtocolError "unexpected client packet")
     finally:
-      publish-task.cancel
-
-  publish packet/PublishPacket:
-    logger_.info "publishing $packet"
-    if packet.retain:
-      if packet.payload.size == 0: retained.remove packet.topic
-      else: retained.set packet.topic packet
-      packet = packet.with --no-retain
-
-    // Hand over the packet to the publish channel.
-    // We can't notify the sessions ourselves as the current task might be killed soon.
-    publish-channel_.add packet
-
-  remove-session_ client-id/string:
-    sessions_.remove client-id
+      critical-do:
+        if writer: writer.cancel
+        connection.close
+        if session:
+          state_.detach session generation Time.monotonic-us --graceful=(graceful or tasks_.stopping)
+        if writer-failure is StorageError: stop_ --reason=writer-failure

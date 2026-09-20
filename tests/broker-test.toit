@@ -3,7 +3,7 @@
 // be found in the tests/LICENSE file.
 
 import expect show *
-import mqtt.bounded-broker show *
+import mqtt.broker show *
 import mqtt.packets show *
 import mqtt.last-will show *
 import mqtt.topic-qos show *

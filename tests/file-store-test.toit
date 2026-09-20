@@ -9,7 +9,7 @@ import mqtt.file-payload-store show *
 import mqtt.payload-store show *
 import mqtt.packets show *
 import mqtt.topic-qos show *
-import mqtt.bounded-broker show Broker BrokerLimits
+import mqtt.broker show Broker BrokerLimits
 import .support.peer
 
 /** A real filesystem adapter, using a fresh test-owned directory. */

@@ -47,7 +47,7 @@ class Wire:
     frame := io.Reader header.bytes
     result/Packet? := null
     failure := catch:
-      result = Packet.deserialize frame
+      result = Packet.decode-frame_ frame
       if result is PublishPacket: (result as PublishPacket).payload
       if frame.try-ensure-buffered 1: throw "trailing packet bytes"
       validate_ result body

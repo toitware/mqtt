@@ -3,7 +3,6 @@
 // found in the LICENSE file.
 
 import io
-import reader as old-reader
 
 import .last-will
 import .topic-qos
@@ -17,7 +16,7 @@ abstract class Packet:
 
   constructor .type --.flags=0:
 
-  static deserialize reader/io.Reader -> Packet?:
+  static decode-frame_ reader/io.Reader -> Packet?:
     if not reader.try-ensure-buffered 1: return null
     byte1 := reader.read-byte
     kind := byte1 >> 4
@@ -55,12 +54,6 @@ abstract class Packet:
   abstract variable-header -> ByteArray
 
   abstract payload -> ByteArray
-
-  ensure-drained_ -> none:
-    // Most packets drain the reader they deserialize from eagerly, but
-    // we allow streaming the payload for a few types. For those, we
-    // override this method and make sure the whole payload has been
-    // drained when we're done processing a packet.
 
   serialize -> ByteArray:
     buffer := io.Buffer
@@ -182,7 +175,7 @@ class ConnectPacket extends Packet:
         + " $(clean-session ? "clean": "reuse")"
         + " $(last-will ? "last-will-for-$last-will.topic" : "no-last-will")"
         + " $(username ? "with-username-$username" : "no-username")"
-        + " $(password ? "with-password-$password" : "no-password")"
+        + " $(password ? "with-password" : "no-password")"
         + " $keep-alive"
 class ConnAckPacket extends Packet:
   static TYPE ::= 2
@@ -220,47 +213,20 @@ class PublishPacket extends Packet:
   topic /string
   packet-id /int?
 
-  reader_ /PublishPacketReader_? := ?
-  payload_ /ByteArray? := ?
+  payload/ByteArray
 
   constructor.deserialize_ reader/io.Reader size/int flags/int:
-    retain := flags & 0b0001 != 0
     qos := (flags & 0b0110) >> 1
-    duplicate := flags & 0b1000 != 0
     topic = Packet.decode-string reader
     size -= 2 + topic.size
-    if qos > 0:
-      packet-id = Packet.decode-uint16 reader
-      size -= 2
-    else:
-      packet-id = null
-    reader_ = PublishPacketReader_ reader size
-    payload_ = null
-    super TYPE --flags=(duplicate ? 0b1000 : 0) | (qos << 1) | (retain ? 1 : 0)
+    packet-id = qos > 0 ? Packet.decode-uint16 reader : null
+    if qos > 0: size -= 2
+    if size < 0: throw "INVALID_PUBLISH_LENGTH"
+    payload = reader.read-bytes size
+    super TYPE --flags=flags
 
-  constructor .topic payload/ByteArray --qos/int --retain/bool --.packet-id --duplicate=false:
-    reader_ = null
-    payload_ = payload
-    super TYPE
-        --flags=(duplicate ? 0b1000 : 0) | (qos << 1) | (retain ? 1 : 0)
-
-  payload -> ByteArray:
-    payload := payload_
-    if payload: return payload
-    payload = reader_.read-payload_
-    if not payload: throw "Already streaming payload"
-    payload_ = payload
-    reader_ = null
-    return payload
-
-  payload-stream -> io.Reader:
-    if payload_: throw "Already read payload"
-    return reader_.stream_
-
-  ensure-drained_ -> none:
-    if not reader_: return
-    reader_.drain_
-    reader_ = null
+  constructor .topic .payload --qos/int --retain/bool --.packet-id --duplicate=false:
+    super TYPE --flags=(duplicate ? 8 : 0) | (qos << 1) | (retain ? 1 : 0)
 
   variable-header -> ByteArray:
     buffer := io.Buffer
@@ -305,51 +271,14 @@ class PublishPacket extends Packet:
             + " $(duplicate ? "dup" : "no-dup")"
             + " $(retain ? "retain" : "no-retain")"
             + " $payload.size bytes"
-    sub-payload := payload_[..min 15 payload_.size]
+    sub-payload := payload[..min 15 payload.size]
     if (sub-payload.every: it < 128):
       result += " \"$(sub-payload.to-string-non-throwing)\""
     else:
       result += " $sub-payload"
-    if sub-payload.size < payload_.size:
+    if sub-payload.size < payload.size:
       result += " ..."
     return result
-
-class PublishPacketReader_ extends io.Reader implements old-reader.SizedReader:
-  reader_ /io.Reader
-  content-size /int
-  remaining_ /int? := null
-
-  constructor .reader_ .content-size:
-
-  /** Deprecated. Use $content-size instead. */
-  size -> int:
-    return content-size
-
-  read_ -> ByteArray?:
-    remaining := remaining_
-    assert: remaining != null  // Should have called $stream_ already.
-    if remaining == 0: return null
-    bytes := reader_.read --max-size=remaining
-    if bytes: remaining_ = remaining - bytes.size
-    return bytes
-
-  stream_ -> io.Reader:
-    if remaining_ == null: remaining_ = content-size
-    return this
-
-  drain_ -> none:
-    remaining := remaining_
-    if remaining == 0: return
-    reader_.skip (remaining or content-size)
-    remaining_ = 0
-
-  read-payload_ -> ByteArray?:
-    // If we already started streaming from the underlying reader,
-    // we cannot produce a payload.
-    if remaining_ != null: return null
-    payload := reader_.read-bytes content-size
-    remaining_ = 0
-    return payload
 
 class PubAckPacket extends Packet implements AckPacket:
   static TYPE ::= 4

@@ -6,13 +6,12 @@ import mqtt
 
 main:
   client := mqtt.Client --connector=(mqtt.TcpConnector --host="localhost")
-      --options=(mqtt.SessionOptions --client-id="sensor" --clean-session)
+      --options=(mqtt.SessionOptions --client-id="display" --clean-session)
   client.start
   try:
-    with-timeout --ms=30_000:
-      client.wait-connected
-      delivery := client.publish "sensor/temperature" "21.5"
-      delivery.wait
+    (client.subscribe "sensor/#").wait
+    while message := client.receive:
+      print "$message.topic: $message.payload.to-string"
   finally:
     client.close --force
     client.wait-closed

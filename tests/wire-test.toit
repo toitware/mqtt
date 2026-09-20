@@ -8,6 +8,8 @@ import mqtt.wire show *
 import mqtt.packets show *
 import mqtt.errors show *
 import mqtt.topics show *
+import mqtt.topic-qos show *
+import mqtt.last-will show *
 
 /** A reader that makes every byte a separate transport read. */
 class Fragments extends io.Reader:
@@ -35,6 +37,12 @@ main:
     #[0xd0, 0x80, 0],
     #[0x20, 2, 1, 4],
     #[0x36, 5, 0, 1, 'x', 0, 1],
+    #[0x30, 4, 0, 2, 0xc0, 0xaf],
+    #[0x30, 3, 0, 1, 0],
+    #[0x82, 7, 0, 1, 0, 2, 'a', '+', 1],
+    #[0x90, 3, 0, 1, 3],
+    #[0xe0, 1, 0],
+    #[0x20, 1, 0],
   ].do: | bytes |
     failure := catch: wire.read (io.Reader bytes)
     expect failure is ProtocolError
@@ -47,6 +55,26 @@ main:
   encoded.size.repeat: | length |
     if length == 0: continue.repeat
     expect-not-null (catch: wire.read (Fragments encoded[..length]))
+
+  // Every supported packet kind crosses the same codec boundary.
+  [
+    ConnectPacket "client" --clean-session=false --username="user" --password="secret"
+        --keep-alive=(Duration --s=60)
+        --last-will=(LastWill "status" #[0] --qos=1),
+    ConnAckPacket --session-present,
+    PubAckPacket --packet-id=65535,
+    SubscribePacket [TopicQos "a/+"] --packet-id=1,
+    SubAckPacket --packet-id=1 --qos=[0, 1, 0x80],
+    UnsubscribePacket ["a/#"] --packet-id=1,
+    UnsubAckPacket --packet-id=1,
+    PingReqPacket,
+    PingRespPacket,
+    DisconnectPacket,
+    PublishPacket "temperatur/ø" (ByteArray 200 --initial=42) --qos=0 --retain=false --packet-id=null,
+  ].do: | original/Packet |
+    bytes := wire.encode original
+    roundtrip := wire.read (Fragments bytes)
+    expect-equals bytes (wire.encode roundtrip)
 
   expect (matches "a/#" "a")
   expect (matches "a/+/c" "a/b/c")
