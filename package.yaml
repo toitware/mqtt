@@ -1,4 +1,4 @@
 name: mqtt
-description: An MQTT v3.1.1 Toit client, with support for QoS 0 and 1.
+description: Bounded MQTT 3.1.1 client and embedded broker with QoS 0 and 1.
 environment:
-  sdk: ^2.0.0-alpha.170
+  sdk: ^2.0.0-alpha.198
