@@ -9,7 +9,7 @@ Options to connect to an MQTT broker.
 */
 class SessionOptions:
   static DEFAULT-KEEP-ALIVE ::= Duration --s=60
-  static DEFAULT-MAX-INFLIGHT ::= 20
+  static DEFAULT-MAX-PENDING ::= 20
 
   client-id     /string
   clean-session /bool
@@ -17,12 +17,11 @@ class SessionOptions:
   password      /string?
   keep-alive    /Duration
   last-will     /LastWill?
-  max-inflight  /int
+  max-pending   /int
 
   /**
-  The $client-id (client identifier) will be used by the broker to identify a client.
-    It should be unique per broker and can be between 1 and 23 characters long.
-    Only characters and numbers are allowed
+  The $client-id identifies this session. An empty ID requires clean-session;
+    otherwise use a stable, broker-unique UTF-8 identifier. Broker limits apply.
 
   If necessary, the $username/$password credentials can be used to authenticate.
 
@@ -36,10 +35,10 @@ class SessionOptions:
   When provided, the $last-will configuration is used to send when the client
     disconnects ungracefully.
 
-  The $max-inflight parameter sets the maximum number of non-acknowledged QoS 1 packets.
-    If the client tries to send a QoS=1 packet while $max-inflight other packets are
-    still waiting for an acknowledgement, then the client blocks the 'publish' call
-    until the number of in-flight packets is below $max-inflight.
+  The $max-pending parameter bounds all accepted operations, including queued
+    publishes, subscriptions, and unsubscriptions. Admission blocks until an
+    operation completes or the client closes. Separate byte limits are configured
+    on Client. Keepalive is a whole number of seconds; zero disables pings.
   */
   constructor
       --.client-id
@@ -48,5 +47,5 @@ class SessionOptions:
       --.password = null
       --.keep-alive = DEFAULT-KEEP-ALIVE
       --.last-will = null
-      --.max-inflight = DEFAULT-MAX-INFLIGHT:
-    if max-inflight < 1: throw "INVALID_ARGUMENT"
+      --.max-pending = DEFAULT-MAX-PENDING:
+    if not 1 <= max-pending <= 65_000: throw "INVALID_ARGUMENT"

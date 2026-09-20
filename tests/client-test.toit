@@ -4,7 +4,7 @@
 
 import expect show *
 import monitor
-import mqtt.managed-client show *
+import mqtt.client show *
 import mqtt.session-options show *
 import mqtt.packets show *
 import mqtt.errors show *
@@ -13,7 +13,7 @@ import .support.peer
 
 new-client connector/ScriptConnector --limit/int=4 -> Client:
   return Client --connector=connector
-      --options=(SessionOptions --client-id="test" --keep-alive=Duration.ZERO --max-inflight=limit)
+      --options=(SessionOptions --client-id="test" --keep-alive=Duration.ZERO --max-pending=limit)
       --retry=(RetryPolicy --initial-delay=Duration.ZERO --maximum-delay=Duration.ZERO --attempts=2)
 
 publish-completes-on-ack:
