@@ -70,3 +70,15 @@ class PeerReader_ extends io.Reader:
   link/Link
   constructor .link:
   read_ -> ByteArray?: return link.read
+
+monitor MemoryListener implements Listener:
+  links/Deque := Deque
+  closed := false
+  add link/Link:
+    links.add link
+  accept -> Link?:
+    await: closed or not links.is-empty
+    if closed: return null
+    return links.remove-first
+  close -> none:
+    closed = true
